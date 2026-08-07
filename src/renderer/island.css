@@ -289,3 +289,31 @@ html, body {
   outline: none;
 }
 .q-input:focus { border-color: var(--accent); }
+/* Final custom-input item: checkbox on the left, single-line input on the
+   right, on the same horizontal line. The checkbox only gates whether the
+   typed text counts as the answer — the input stays editable independently. */
+.q-custom {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+}
+.q-custom-check-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.q-custom-check {
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.q-custom .q-input {
+  flex: 1;
+  min-width: 0;
+  margin-top: 0;
+}

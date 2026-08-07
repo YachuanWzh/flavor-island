@@ -75,13 +75,19 @@ function parseQuestions(event) {
 
 // Build the PermissionRequest "allow" response. `answers` is keyed by question
 // text. Multi-select answers are pre-joined strings (the UI does the joining).
-function buildAllowResponse(event, answers = {}) {
+// `details` (optional) carries each question's custom-input combination state
+// ({ checked, text }) and is attached as `answerDetails` so the submitted data
+// explicitly contains both the checkbox state and the input text.
+function buildAllowResponse(event, answers = {}, details = {}) {
   const toolInput = (event && event.toolInput) || {};
   const updatedInput = { ...toolInput };
   // `questions` must always be present — the agent calls map() on it directly;
   // an absent key can crash, so always carry it through.
   updatedInput.questions = Array.isArray(toolInput.questions) ? toolInput.questions : [];
   updatedInput.answers = answers;
+  if (details && typeof details === 'object' && Object.keys(details).length) {
+    updatedInput.answerDetails = details;
+  }
   const firstAnswer = Object.values(answers)[0];
   if (typeof firstAnswer === 'string') updatedInput.answer = firstAnswer;
 

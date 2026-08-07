@@ -243,7 +243,7 @@ ipcMain.on('reset-position', () => {
 });
 ipcMain.on('permission-decision', (_evt, { key, behavior }) => appState.resolvePermission(key, behavior));
 ipcMain.on('question-answer', (_evt, { key, answer }) => appState.resolveQuestion(key, answer));
-ipcMain.on('ask-answer', (_evt, { key, answers }) => appState.resolveAskUserQuestion(key, answers));
+ipcMain.on('ask-answer', (_evt, { key, answers, details }) => appState.resolveAskUserQuestion(key, answers, details));
 ipcMain.on('ask-skip', (_evt, { key }) => appState.skipAskUserQuestion(key));
 ipcMain.on('quit', () => app.quit());
 

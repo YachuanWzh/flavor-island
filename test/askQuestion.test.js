@@ -71,6 +71,24 @@ test('buildAllowResponse carries questions and answers', () => {
   assert.equal(resp.hookSpecificOutput.decision.updatedInput.answer, 'answer1');
 });
 
+test('buildAllowResponse carries custom-input checkbox state and text', () => {
+  const ev = permEvent({ questions: [{ question: 'Q1' }] });
+  const resp = buildAllowResponse(ev, { Q1: 'typed' }, { Q1: { checked: true, text: 'typed' } });
+  assert.deepEqual(resp.hookSpecificOutput.decision.updatedInput.answerDetails, {
+    Q1: { checked: true, text: 'typed' },
+  });
+  assert.equal(resp.hookSpecificOutput.decision.updatedInput.answers.Q1, 'typed');
+  assert.equal(resp.hookSpecificOutput.decision.updatedInput.answer, 'typed');
+});
+
+test('buildAllowResponse omits answerDetails when none provided', () => {
+  const ev = permEvent({ questions: [{ question: 'Q1' }] });
+  const resp = buildAllowResponse(ev, { Q1: 'answer1' });
+  const updated = resp.hookSpecificOutput.decision.updatedInput;
+  assert.equal('answerDetails' in updated, false);
+  assert.equal(updated.answers.Q1, 'answer1');
+});
+
 test('buildAllowResponse preserves questions when toolInput lacks them', () => {
   const ev = permEvent({ foo: 'bar' });
   const resp = buildAllowResponse(ev, {});

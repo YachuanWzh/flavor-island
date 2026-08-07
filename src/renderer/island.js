@@ -66,20 +66,8 @@ function draftFor(pend) {
   return d;
 }
 
-// Resolve one question's draft into the final answer string (multi-select labels
-// are joined with ", ", mirroring the macOS app).
-function answerForQuestion(q, qd) {
-  if (q.options && q.options.length) {
-    if (q.multiSelect) {
-      const parts = [...qd.set];
-      if (qd.other && qd.otherText.trim()) parts.push(qd.otherText.trim());
-      return parts.join(', ');
-    }
-    if (qd.other) return qd.otherText.trim();
-    return qd.value || '';
-  }
-  return qd.otherText.trim(); // text-only question
-}
+// answerForQuestion / allQuestionsAnswered / buildAskPayload live in askDraft.js
+// (loaded before this file) so the pure composition logic is unit-testable.
 
 function buildAskCard(div, pend, onChanged) {
   const draft = draftFor(pend);
@@ -116,14 +104,11 @@ function buildAskCard(div, pend, onChanged) {
           onChanged();
         }));
       });
-      // "Other / custom" free-text option
-      opts.appendChild(optionRow('其他（自定义输入）', null, q.multiSelect, qd.other, () => {
-        qd.other = !qd.other;
-        if (!q.multiSelect && qd.other) qd.value = null;
-        onChanged();
-      }));
       qEl.appendChild(opts);
-      if (qd.other) qEl.appendChild(textInput(qd, onChanged));
+      // Final custom-input item: a single horizontal row with a checkbox on the
+      // left and a single-line input on the right. The two controls are
+      // independent — toggling the checkbox never clears typed text.
+      qEl.appendChild(customRow(q, qd, onChanged));
     } else {
       // Text-only question.
       qEl.appendChild(textInput(qd, onChanged));
@@ -131,7 +116,7 @@ function buildAskCard(div, pend, onChanged) {
     div.appendChild(qEl);
   });
 
-  const allAnswered = pend.questions.every((q, qi) => answerForQuestion(q, draft[qi]).length > 0);
+  const allAnswered = allQuestionsAnswered(pend.questions, draft);
 
   const actions = document.createElement('div');
   actions.className = 'actions';
@@ -146,10 +131,11 @@ function buildAskCard(div, pend, onChanged) {
   submit.style.opacity = allAnswered ? '1' : '0.5';
   submit.onclick = () => {
     if (!allAnswered) return;
-    const answers = {};
-    pend.questions.forEach((q, qi) => { answers[q.question] = answerForQuestion(q, draft[qi]); });
+    // Payload carries the answer strings (unchanged contract) plus, per
+    // question, the custom-input checkbox state and its text together.
+    const { answers, details } = buildAskPayload(pend.questions, draft);
     askDrafts.delete(pend.key);
-    window.flavorIsland.answerQuestions(pend.key, answers);
+    window.flavorIsland.answerQuestions(pend.key, answers, details);
   };
   actions.append(skip, submit);
   div.appendChild(actions);
@@ -175,6 +161,46 @@ function optionRow(label, description, multi, selected, onClick) {
   }
   row.append(mark, body);
   row.onclick = onClick;
+  return row;
+}
+
+// Final custom-input item: checkbox on the left, single-line text input on the
+// right, on the same horizontal row. The checkbox gates whether the typed text
+// counts as the answer (`qd.other`); the input holds the text (`qd.otherText`).
+// They are independent: toggling the checkbox never clears typed text, and the
+// input accepts single-line text regardless of the checkbox state.
+function customRow(q, qd, onChanged) {
+  const row = document.createElement('div');
+  row.className = 'q-custom';
+
+  const label = document.createElement('label');
+  label.className = 'q-custom-check-label';
+  const box = document.createElement('input');
+  box.type = 'checkbox';
+  box.className = 'q-custom-check';
+  box.checked = qd.other;
+  box.title = '使用自定义回答';
+  box.setAttribute('aria-label', '使用自定义回答');
+  box.onchange = (e) => {
+    qd.other = e.target.checked;
+    // A checked custom box takes over from the picked option for single-select.
+    if (!q.multiSelect && qd.other) qd.value = null;
+    onChanged();
+  };
+  label.appendChild(box);
+
+  const input = document.createElement('input');
+  input.className = 'q-input q-custom-input';
+  input.type = 'text';
+  input.placeholder = '输入自定义回答…';
+  input.value = qd.otherText;
+  input.oninput = (e) => { qd.otherText = e.target.value; };
+  // Refresh the Submit enabled state when focus leaves or Enter is pressed, so
+  // typing isn't interrupted by DOM rebuilds.
+  input.onchange = () => onChanged();
+  input.onkeydown = (e) => { if (e.key === 'Enter') { qd.otherText = input.value; onChanged(); } };
+
+  row.append(label, input);
   return row;
 }
 

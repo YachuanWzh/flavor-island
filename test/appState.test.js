@@ -75,6 +75,24 @@ test('requestAskUserQuestion resolves with allow+answers', async () => {
   assert.equal(resp.hookSpecificOutput.decision.updatedInput.answers.Q1, 'b');
 });
 
+test('resolveAskUserQuestion carries checkbox state + text into the response', async () => {
+  const state = createAppState();
+  const ev = evt('PermissionRequest', {
+    toolName: 'AskUserQuestion',
+    toolInput: { questions: [{ question: 'Q1', options: ['a', 'b'] }] },
+  });
+  const response = state.requestAskUserQuestion(ev);
+  state.resolveAskUserQuestion(
+    state.listPending()[0].key,
+    { Q1: 'custom answer' },
+    { Q1: { checked: true, text: 'custom answer' } }
+  );
+  const resp = await response;
+  const updated = resp.hookSpecificOutput.decision.updatedInput;
+  assert.equal(updated.answers.Q1, 'custom answer');
+  assert.deepEqual(updated.answerDetails.Q1, { checked: true, text: 'custom answer' });
+});
+
 test('empty AskUserQuestion auto-allows without pending', async () => {
   const state = createAppState();
   const ev = evt('PermissionRequest', { toolName: 'AskUserQuestion', toolInput: {} });

@@ -116,6 +116,52 @@ test('full AskUserQuestion flow: bridge sends, UI answers, bridge gets allow+ans
   }
 });
 
+test('AskUserQuestion submit carries checkbox state + input text to the bridge', async () => {
+  const pipe = makePipe();
+  const appState = createAppState();
+  const server = createHookServer({
+    pipe,
+    onEvent: (e) => appState.handleEvent(e),
+    onPermission: (e) => appState.requestPermission(e),
+    onAskUserQuestion: (e) => appState.requestAskUserQuestion(e),
+    onQuestion: () => null,
+  });
+  await server.start();
+
+  try {
+    const pendingReply = bridgeSend(pipe, {
+      hook_event_name: 'PermissionRequest',
+      session_id: 'flavor-4',
+      tool_name: 'AskUserQuestion',
+      tool_input: {
+        questions: [
+          { question: 'Which plan?', options: [{ label: 'A' }, { label: 'B' }] },
+        ],
+      },
+    });
+    await new Promise((r) => setTimeout(r, 30));
+    const pending = appState.listPending();
+    assert.equal(pending[0].kind, 'askUserQuestion');
+
+    // The renderer's submit sends both the answer strings and the per-question
+    // checkbox+text combination details.
+    appState.resolveAskUserQuestion(
+      pending[0].key,
+      { 'Which plan?': 'my custom' },
+      { 'Which plan?': { checked: true, text: 'my custom' } }
+    );
+    const reply = JSON.parse(await pendingReply);
+    assert.equal(reply.hookSpecificOutput.decision.behavior, 'allow');
+    assert.equal(reply.hookSpecificOutput.decision.updatedInput.answers['Which plan?'], 'my custom');
+    assert.deepEqual(reply.hookSpecificOutput.decision.updatedInput.answerDetails['Which plan?'], {
+      checked: true,
+      text: 'my custom',
+    });
+  } finally {
+    await server.stop();
+  }
+});
+
 test('deny path returns deny decision to bridge', async () => {
   const pipe = makePipe();
   const appState = createAppState();

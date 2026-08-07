@@ -164,13 +164,15 @@ function createAppState() {
   }
 
   // answers: { [questionText]: answerString }. Multi-select answers are
-  // pre-joined by the UI before they reach here.
-  function resolveAskUserQuestion(key, answers) {
+  // pre-joined by the UI before they reach here. details: { [questionText]:
+  // { checked, text } } carries each question's custom-input checkbox state and
+  // text so the submitted data contains both.
+  function resolveAskUserQuestion(key, answers, details) {
     const entry = pending.get(key);
     if (!entry) return false;
     pending.delete(key);
     clearWaitingQuestion(entry.sessionId);
-    entry.resolve(buildAllowResponse(entry.event, answers || {}));
+    entry.resolve(buildAllowResponse(entry.event, answers || {}, details || {}));
     notify();
     return true;
   }
