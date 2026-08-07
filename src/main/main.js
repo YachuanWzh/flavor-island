@@ -79,6 +79,10 @@ function positionWindow(height) {
     min: 1,
     userPosition,
   });
+  // Skip no-op resizes: re-applying identical bounds forces a window redraw,
+  // which shows up as a flicker on the transparent always-on-top window.
+  const cur = win.getBounds();
+  if (cur.x === bounds.x && cur.y === bounds.y && cur.width === bounds.width && cur.height === bounds.height) return;
   lastSetBounds = bounds;
   win.setBounds(bounds);
 }

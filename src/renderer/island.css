@@ -173,6 +173,9 @@ html, body {
 
 .island:not(.collapsed) .panel { display: flex; }
 .island:not(.collapsed) .panel .row { animation: row-in 0.22s ease-out both; }
+/* Same row set re-rendered (a state push while nothing changed) — skip the
+   entry animation so the panel doesn't blink on the transparent window. */
+.panel.settled .row { animation: none; }
 @keyframes row-in {
   from { opacity: 0; transform: translateY(-5px); }
   to { opacity: 1; transform: translateY(0); }
@@ -228,7 +231,7 @@ html, body {
   overflow-y: auto;
 }
 
-.actions { display: flex; gap: 6px; margin-top: 6px; }
+.actions { display: flex; gap: 6px; margin-top: 8px; }
 .btn {
   flex: 1;
   font-family: var(--font);
@@ -238,10 +241,16 @@ html, body {
   border-radius: 9px;
   padding: 7px 8px;
   cursor: pointer;
-  transition: filter 0.12s ease, transform 0.06s ease;
+  transition: filter 0.12s ease, transform 0.06s ease, opacity 0.15s ease;
 }
 .btn:hover { filter: brightness(1.15); }
 .btn:active { transform: translateY(1px); }
+.btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+  filter: none;
+}
+.btn:disabled:active { transform: none; }
 .btn-allow { background: var(--accent); color: #06220d; }
 /* "Allow all" is a softer, outlined green to read as a broader, stickier choice
    than the plain one-shot Allow. */
@@ -255,28 +264,85 @@ html, body {
 .btn-submit { background: var(--accent); color: #06220d; }
 
 /* AskUserQuestion card */
-.question { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
-.q-header { font-size: 10px; color: var(--accent); text-transform: uppercase; letter-spacing: 0.4px; }
-.q-text { font-size: 11.5px; color: var(--fg); white-space: pre-wrap; word-break: break-word; }
+.question { display: flex; flex-direction: column; gap: 5px; margin-top: 6px; }
+.question + .question {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--line);
+}
+/* Header reads as a small accent chip instead of loose uppercase text. */
+.q-header {
+  align-self: flex-start;
+  font-size: 9.5px;
+  color: var(--accent);
+  background: rgba(76,217,100,0.1);
+  border: 1px solid rgba(76,217,100,0.35);
+  border-radius: 999px;
+  padding: 1px 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.q-text {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--fg);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 .q-options { display: flex; flex-direction: column; gap: 4px; margin-top: 2px; }
 .opt {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
+  gap: 9px;
   background: var(--bg-inset);
   border: 1px solid var(--line);
-  border-radius: 9px;
-  padding: 6px 8px;
+  border-radius: 10px;
+  padding: 7px 10px;
   cursor: pointer;
-  transition: border-color 0.12s ease, background 0.12s ease;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease, transform 0.06s ease;
 }
-.opt:hover { border-color: #3a3f4f; }
-.opt.selected { border-color: var(--accent); background: rgba(76,217,100,0.08); }
-.opt-mark { font-size: 11px; color: var(--muted); flex-shrink: 0; line-height: 1.4; }
-.opt.selected .opt-mark { color: var(--accent); }
-.opt-body { display: flex; flex-direction: column; gap: 1px; }
-.opt-label { font-size: 11px; color: var(--fg); }
-.opt-desc { font-size: 9.5px; color: var(--muted); }
+.opt:hover { border-color: #414a61; background: #10121b; }
+.opt:active { transform: scale(0.99); }
+.opt.selected {
+  border-color: rgba(76,217,100,0.75);
+  background: rgba(76,217,100,0.09);
+  box-shadow: 0 0 0 1px rgba(76,217,100,0.22);
+}
+/* Selection mark is CSS-drawn: a radio circle for single-select… */
+.opt-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  height: 13px;
+  margin-top: 1px;
+  flex-shrink: 0;
+  border: 1.5px solid #4a5065;
+  border-radius: 50%;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+.opt:hover .opt-mark { border-color: #6b7390; }
+.opt.selected .opt-mark { border-color: var(--accent); }
+/* …filled with an inset ring when picked. */
+.opt:not(.opt-multi).selected .opt-mark {
+  background: var(--accent);
+  box-shadow: inset 0 0 0 2.5px var(--bg-inset);
+}
+/* Multi-select uses a rounded square with a check instead. */
+.opt-multi .opt-mark { border-radius: 4px; }
+.opt-multi.selected .opt-mark { background: var(--accent); }
+.opt-multi.selected .opt-mark::after {
+  content: '✓';
+  font-size: 9px;
+  line-height: 1;
+  font-weight: 700;
+  color: #06220d;
+}
+.opt-body { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.opt-label { font-size: 11px; font-weight: 600; color: var(--fg); }
+.opt.selected .opt-label { color: #d9ffe2; }
+.opt-desc { font-size: 9.5px; line-height: 1.35; color: var(--muted); }
 .q-input {
   font-family: var(--font);
   font-size: 11px;
@@ -287,17 +353,24 @@ html, body {
   padding: 6px 8px;
   margin-top: 2px;
   outline: none;
+  transition: border-color 0.15s ease;
 }
 .q-input:focus { border-color: var(--accent); }
 /* Final custom-input item: checkbox on the left, single-line input on the
-   right, on the same horizontal line. The checkbox only gates whether the
-   typed text counts as the answer — the input stays editable independently. */
+   right, styled as a dashed sibling of the option rows so it reads as "one
+   more option". The checkbox only gates whether the typed text counts as the
+   answer — the input stays editable independently. */
 .q-custom {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   margin-top: 2px;
+  border: 1px dashed #39415a;
+  border-radius: 10px;
+  padding: 4px 10px;
+  transition: border-color 0.15s ease;
 }
+.q-custom:focus-within { border-color: var(--accent); }
 .q-custom-check-label {
   display: inline-flex;
   align-items: center;
@@ -316,4 +389,8 @@ html, body {
   flex: 1;
   min-width: 0;
   margin-top: 0;
+  padding: 3px 0;
+  background: transparent;
+  border: none;
 }
+.q-custom .q-input:focus { border-color: transparent; }

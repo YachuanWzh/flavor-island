@@ -57,6 +57,9 @@ function pendingForSession(pending, sessionId) {
 // (one entry per question): { value, set: string[], other, otherText }.
 const askDrafts = new Map();
 
+// Last height sent to main for a window resize — guards against no-op resizes.
+let lastResizeH = 0;
+
 function draftFor(pend) {
   let d = askDrafts.get(pend.key);
   if (!d || d.length !== pend.questions.length) {
@@ -69,8 +72,16 @@ function draftFor(pend) {
 // answerForQuestion / allQuestionsAnswered / buildAskPayload live in askDraft.js
 // (loaded before this file) so the pure composition logic is unit-testable.
 
-function buildAskCard(div, pend, onChanged) {
+function buildAskCard(div, pend) {
   const draft = draftFor(pend);
+
+  let submitBtn = null;
+  // Selection changes patch the card in place: a full panel rebuild on every
+  // click restarts the row-in animation and re-applies the window bounds,
+  // which reads as a visible flash on the transparent window.
+  const refreshSubmit = () => {
+    if (submitBtn) submitBtn.disabled = !allQuestionsAnswered(pend.questions, draft);
+  };
 
   pend.questions.forEach((q, qi) => {
     const qd = draft[qi];
@@ -91,62 +102,73 @@ function buildAskCard(div, pend, onChanged) {
     if (hasOptions) {
       const opts = document.createElement('div');
       opts.className = 'q-options';
-      q.options.forEach((opt) => {
-        const selected = q.multiSelect ? qd.set.includes(opt.label) : (!qd.other && qd.value === opt.label);
-        opts.appendChild(optionRow(opt.label, opt.description, q.multiSelect, selected, () => {
+      let customEl = null;
+      const rows = q.options.map((opt) => {
+        const isSelected = () => (q.multiSelect
+          ? qd.set.includes(opt.label)
+          : (!qd.other && qd.value === opt.label));
+        const row = optionRow(opt.label, opt.description, q.multiSelect, isSelected());
+        row.onclick = () => {
           if (q.multiSelect) {
             const i = qd.set.indexOf(opt.label);
             if (i >= 0) qd.set.splice(i, 1); else qd.set.push(opt.label);
           } else {
             qd.value = opt.label;
             qd.other = false;
+            if (customEl) setCustomChecked(customEl, false);
           }
-          onChanged();
-        }));
+          refreshRows();
+          refreshSubmit();
+        };
+        return { row, isSelected };
       });
+      const refreshRows = () => rows.forEach(({ row, isSelected }) => row.classList.toggle('selected', isSelected()));
+      rows.forEach(({ row }) => opts.appendChild(row));
       qEl.appendChild(opts);
       // Final custom-input item: a single horizontal row with a checkbox on the
       // left and a single-line input on the right. The two controls are
       // independent — toggling the checkbox never clears typed text.
-      qEl.appendChild(customRow(q, qd, onChanged));
+      customEl = customRow(q, qd, () => {
+        if (!q.multiSelect) refreshRows();
+        refreshSubmit();
+      });
+      qEl.appendChild(customEl);
     } else {
       // Text-only question.
-      qEl.appendChild(textInput(qd, onChanged));
+      qEl.appendChild(textInput(qd, refreshSubmit));
     }
     div.appendChild(qEl);
   });
-
-  const allAnswered = allQuestionsAnswered(pend.questions, draft);
 
   const actions = document.createElement('div');
   actions.className = 'actions';
   const skip = document.createElement('button');
   skip.className = 'btn btn-skip';
-  skip.textContent = 'Skip';
+  skip.textContent = '跳过';
   skip.onclick = () => { askDrafts.delete(pend.key); window.flavorIsland.skipQuestions(pend.key); };
-  const submit = document.createElement('button');
-  submit.className = 'btn btn-submit';
-  submit.textContent = 'Submit';
-  submit.disabled = !allAnswered;
-  submit.style.opacity = allAnswered ? '1' : '0.5';
-  submit.onclick = () => {
-    if (!allAnswered) return;
+  submitBtn = document.createElement('button');
+  submitBtn.className = 'btn btn-submit';
+  submitBtn.textContent = '提交';
+  submitBtn.onclick = () => {
+    if (submitBtn.disabled) return;
     // Payload carries the answer strings (unchanged contract) plus, per
     // question, the custom-input checkbox state and its text together.
     const { answers, details } = buildAskPayload(pend.questions, draft);
     askDrafts.delete(pend.key);
     window.flavorIsland.answerQuestions(pend.key, answers, details);
   };
-  actions.append(skip, submit);
+  refreshSubmit();
+  actions.append(skip, submitBtn);
   div.appendChild(actions);
 }
 
-function optionRow(label, description, multi, selected, onClick) {
+function optionRow(label, description, multi, selected) {
   const row = document.createElement('div');
-  row.className = `opt${selected ? ' selected' : ''}`;
+  row.className = `opt${multi ? ' opt-multi' : ''}${selected ? ' selected' : ''}`;
+  // The mark is a CSS-drawn radio/checkbox (circle vs rounded square) so it
+  // stays crisp regardless of font glyph availability.
   const mark = document.createElement('span');
   mark.className = 'opt-mark';
-  mark.textContent = multi ? (selected ? '☑' : '☐') : (selected ? '◉' : '○');
   const body = document.createElement('div');
   body.className = 'opt-body';
   const lab = document.createElement('span');
@@ -160,8 +182,12 @@ function optionRow(label, description, multi, selected, onClick) {
     body.appendChild(d);
   }
   row.append(mark, body);
-  row.onclick = onClick;
   return row;
+}
+
+function setCustomChecked(customEl, checked) {
+  const box = customEl.querySelector('.q-custom-check');
+  if (box) box.checked = checked;
 }
 
 // Final custom-input item: checkbox on the left, single-line text input on the
@@ -192,11 +218,11 @@ function customRow(q, qd, onChanged) {
   const input = document.createElement('input');
   input.className = 'q-input q-custom-input';
   input.type = 'text';
-  input.placeholder = '输入自定义回答…';
+  input.placeholder = '或输入自定义回答…';
   input.value = qd.otherText;
   input.oninput = (e) => { qd.otherText = e.target.value; };
-  // Refresh the Submit enabled state when focus leaves or Enter is pressed, so
-  // typing isn't interrupted by DOM rebuilds.
+  // Refresh the Submit enabled state when focus leaves or Enter is pressed —
+  // never mid-typing, so the input keeps focus.
   input.onchange = () => onChanged();
   input.onkeydown = (e) => { if (e.key === 'Enter') { qd.otherText = input.value; onChanged(); } };
 
@@ -211,8 +237,8 @@ function textInput(qd, onChanged) {
   input.placeholder = '输入你的回答…';
   input.value = qd.otherText;
   input.oninput = (e) => { qd.otherText = e.target.value; };
-  // Refresh the Submit enabled state when focus leaves or Enter is pressed, so
-  // typing isn't interrupted by DOM rebuilds.
+  // Refresh the Submit enabled state when focus leaves or Enter is pressed —
+  // never mid-typing, so the input keeps focus.
   input.onchange = () => onChanged();
   input.onkeydown = (e) => { if (e.key === 'Enter') { qd.otherText = input.value; onChanged(); } };
   return input;
@@ -245,7 +271,12 @@ function render({ model, pending, sounds }) {
     pillStatusEl.textContent = top.statusLabel;
   }
 
-  // Panel rows
+  // Panel rows. Rebuilding the DOM replays every row's entry animation, which
+  // flashes on the transparent window — suppress it while the row set (ids +
+  // statuses) is unchanged, so only genuinely new layouts animate in.
+  const panelSig = `${model.collapsed ? 'c' : 'e'}|${model.rows.map((r) => `${r.id}:${r.statusKey}`).join(',')}`;
+  panelEl.classList.toggle('settled', panelEl.dataset.sig === panelSig);
+  panelEl.dataset.sig = panelSig;
   panelEl.innerHTML = '';
   for (const row of model.rows) {
     const pend = row.pending ? pendingForSession(pending, row.id) : null;
@@ -255,13 +286,16 @@ function render({ model, pending, sounds }) {
     // instead of the plain status text.
     const statusText = row.tool || row.statusLabel;
     const statusClass = row.tool ? `row-status tk-${row.toolKey || 'tool'}` : 'row-status';
+    // The ask card renders the question text itself — the row description
+    // would just duplicate the first question above the card.
+    const showDesc = row.toolDescription && !(pend && pend.kind === 'askUserQuestion');
     div.innerHTML = `
       <div class="row-head">
         <img class="row-icon" src="../assets/flavor.png" alt="" />
         <span class="row-title">${escapeHtml(row.title)}</span>
         <span class="${statusClass}">${escapeHtml(statusText)}</span>
       </div>
-      ${row.toolDescription ? `<div class="row-desc">${escapeHtml(row.toolDescription)}</div>` : ''}
+      ${showDesc ? `<div class="row-desc">${escapeHtml(row.toolDescription)}</div>` : ''}
     `;
     if (pend && pend.kind === 'permission') {
       const actions = document.createElement('div');
@@ -286,9 +320,9 @@ function render({ model, pending, sounds }) {
       actions.append(allow, allowAll, deny);
       div.appendChild(actions);
     } else if (pend && pend.kind === 'askUserQuestion' && pend.questions) {
-      // onChanged re-renders from the cached state so selection changes (and the
-      // Submit enabled state) are reflected without waiting for a new push.
-      buildAskCard(div, pend, () => render({ model, pending, sounds: [] }));
+      // Selection changes patch the card in place (see buildAskCard) instead of
+      // re-rendering, so clicking options doesn't flash the panel.
+      buildAskCard(div, pend);
     }
     panelEl.appendChild(div);
   }
@@ -308,6 +342,10 @@ function render({ model, pending, sounds }) {
     // that hard line is the "weird" bottom shadow. Reserve room for it. The pad is
     // transparent and click-through, so it costs nothing in occlusion.
     h += SHADOW_PAD;
+    // Skip no-op resizes: re-applying identical bounds still forces a window
+    // redraw, which shows up as a flicker on the transparent window.
+    if (h === lastResizeH) return;
+    lastResizeH = h;
     window.flavorIsland.resize(h);
   });
 }

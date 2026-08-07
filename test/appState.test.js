@@ -114,6 +114,46 @@ test('skipAskUserQuestion denies', async () => {
   assert.equal(resp.hookSpecificOutput.decision.behavior, 'deny');
 });
 
+test('duplicate AskUserQuestion relays share one pending card', async () => {
+  const state = createAppState();
+  const toolInput = { questions: [{ question: 'Q1', options: ['a', 'b'] }] };
+  const first = state.requestAskUserQuestion(evt('PermissionRequest', { toolName: 'AskUserQuestion', toolInput }));
+  // A second plugin tier relays the identical hook event while the card waits.
+  const second = state.requestAskUserQuestion(evt('PermissionRequest', { toolName: 'AskUserQuestion', toolInput }));
+  assert.equal(state.listPending().length, 1);
+
+  state.resolveAskUserQuestion(state.listPending()[0].key, { Q1: 'b' });
+  const [a, b] = await Promise.all([first, second]);
+  assert.equal(a, b);
+  assert.equal(a.hookSpecificOutput.decision.updatedInput.answers.Q1, 'b');
+});
+
+test('late AskUserQuestion relay replays the resolved response', async () => {
+  const state = createAppState();
+  const toolInput = { questions: [{ question: 'Q1', options: ['a', 'b'] }] };
+  const first = state.requestAskUserQuestion(evt('PermissionRequest', { toolName: 'AskUserQuestion', toolInput }));
+  state.resolveAskUserQuestion(state.listPending()[0].key, { Q1: 'a' });
+  await first;
+
+  // The second tier's relay runs sequentially, after the first resolved.
+  const replay = await state.requestAskUserQuestion(evt('PermissionRequest', { toolName: 'AskUserQuestion', toolInput }));
+  assert.equal(replay.hookSpecificOutput.decision.behavior, 'allow');
+  assert.equal(replay.hookSpecificOutput.decision.updatedInput.answers.Q1, 'a');
+  assert.equal(state.listPending().length, 0);
+});
+
+test('late AskUserQuestion relay replays a skip as deny', async () => {
+  const state = createAppState();
+  const toolInput = { questions: [{ question: 'Q1', options: ['a', 'b'] }] };
+  const first = state.requestAskUserQuestion(evt('PermissionRequest', { toolName: 'AskUserQuestion', toolInput }));
+  state.skipAskUserQuestion(state.listPending()[0].key);
+  await first;
+
+  const replay = await state.requestAskUserQuestion(evt('PermissionRequest', { toolName: 'AskUserQuestion', toolInput }));
+  assert.equal(replay.hookSpecificOutput.decision.behavior, 'deny');
+  assert.equal(state.listPending().length, 0);
+});
+
 test('SessionEnd denies pending permissions for that session', async () => {
   const state = createAppState();
   const decision = state.requestPermission(evt('PermissionRequest', { toolName: 'Bash' }));

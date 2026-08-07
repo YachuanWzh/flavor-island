@@ -40,8 +40,8 @@ function createAppState() {
     for (const [key, entry] of pending) {
       if (entry.sessionId === sessionId) {
         const value = denyValueFor(entry.kind);
-        if (entry.kind === 'permission' && entry.dedupeKey) {
-          recentDecisions.set(entry.dedupeKey, { decision: 'deny', at: Date.now() });
+        if ((entry.kind === 'permission' || entry.kind === 'askUserQuestion') && entry.dedupeKey) {
+          recentDecisions.set(entry.dedupeKey, { decision: value, at: Date.now() });
         }
         entry.resolve(value);
         pending.delete(key);
@@ -140,7 +140,10 @@ function createAppState() {
   // AskUserQuestion (flavor-code's select/type tool). Parses the questions,
   // blocks until the UI submits answers, and resolves with the full hook
   // response object the server writes back. Empty question lists auto-allow so
-  // the agent is never wedged on a prompt with nothing to answer.
+  // the agent is never wedged on a prompt with nothing to answer. Two plugin
+  // tiers can relay the same question (global flavor-island plus the baked-in
+  // codeisland plugin), so duplicate relays share one card's promise while it
+  // waits and replay the resolved response afterwards.
   function requestAskUserQuestion(event) {
     const sessionId = event.sessionId || 'default';
     ensureSession(sessionId);
@@ -150,6 +153,14 @@ function createAppState() {
       return Promise.resolve(buildAllowResponse(event, {}));
     }
 
+    const dedupeKey = permissionDedupeKey(event);
+    for (const entry of pending.values()) {
+      if (entry.kind === 'askUserQuestion' && entry.dedupeKey === dedupeKey) return entry.promise;
+    }
+    pruneRecentDecisions();
+    const recent = recentDecisions.get(dedupeKey);
+    if (recent) return Promise.resolve(recent.decision);
+
     const s = sessions[sessionId];
     s.status = Status.waitingQuestion;
     s.toolDescription = questions[0].question || s.toolDescription;
@@ -157,8 +168,9 @@ function createAppState() {
 
     const key = `ask-${++seq}`;
     const promise = new Promise((resolve) => {
-      pending.set(key, { resolve, event, sessionId, kind: 'askUserQuestion', questions });
+      pending.set(key, { resolve, event, sessionId, kind: 'askUserQuestion', questions, dedupeKey });
     });
+    pending.get(key).promise = promise;
     notify([{ type: 'playSound', event: 'PermissionRequest' }]);
     return promise;
   }
@@ -172,7 +184,11 @@ function createAppState() {
     if (!entry) return false;
     pending.delete(key);
     clearWaitingQuestion(entry.sessionId);
-    entry.resolve(buildAllowResponse(entry.event, answers || {}, details || {}));
+    const response = buildAllowResponse(entry.event, answers || {}, details || {});
+    if (entry.dedupeKey) {
+      recentDecisions.set(entry.dedupeKey, { decision: response, at: Date.now() });
+    }
+    entry.resolve(response);
     notify();
     return true;
   }
@@ -182,7 +198,11 @@ function createAppState() {
     if (!entry) return false;
     pending.delete(key);
     clearWaitingQuestion(entry.sessionId);
-    entry.resolve(buildDenyResponse());
+    const response = buildDenyResponse();
+    if (entry.dedupeKey) {
+      recentDecisions.set(entry.dedupeKey, { decision: response, at: Date.now() });
+    }
+    entry.resolve(response);
     notify();
     return true;
   }

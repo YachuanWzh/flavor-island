@@ -68,13 +68,26 @@ function transform(event) {
   return result;
 }
 
-function toHookDecision(pipeResponse) {
+function toHookDecision(pipeResponse, event) {
   try {
     const parsed = JSON.parse(pipeResponse);
     const dec = parsed?.hookSpecificOutput?.decision;
     if (dec?.behavior === "allow") {
       if (Array.isArray(dec.updatedPermissions) && dec.updatedPermissions.length > 0) {
         return { decision: "allow", additionalContext: "codeisland:allow-all" };
+      }
+      // AskUserQuestion answers travel back inside updatedInput. flavor-code's
+      // hook bus re-validates updatedInput against the PermissionRequest payload
+      // shape, so wrap the answered tool input back into { tool, input, agent }.
+      if (dec.updatedInput && event?.type === "PermissionRequest" && event?.payload?.tool === "AskUserQuestion") {
+        return {
+          decision: "allow",
+          updatedInput: {
+            tool: "AskUserQuestion",
+            input: dec.updatedInput,
+            agent: event.payload.agent === "subagent" ? "subagent" : "main",
+          },
+        };
       }
       return { decision: "allow" };
     }
@@ -101,7 +114,7 @@ async function main() {
       settled = true;
       try { socket.destroy(); } catch { /* ignore */ }
       if (blocking && response) {
-        process.stdout.write(JSON.stringify(toHookDecision(response)), () => process.exit(code));
+        process.stdout.write(JSON.stringify(toHookDecision(response, event)), () => process.exit(code));
       } else {
         process.exit(code);
       }

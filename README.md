@@ -38,6 +38,9 @@ Flavor Island **自带配套的 flavor-code 插件**（`src/plugin/`），并在
    - **macOS**：Unix socket `/tmp/codeisland-<uid>.sock`（可用 `CODEISLAND_SOCKET_PATH` 覆盖，沿用 CodeIsland 原约定）
 3. 对 `PermissionRequest` 阻塞等待浮岛的决策并回写（allow / allow-all / deny）；
    浮岛不可达时回退 `ask`，退回终端审批，不会阻塞 flavor-code。
+4. `AskUserQuestion` 同样经由 `PermissionRequest` 中继：浮岛弹出选择面板
+   （点选选项 / 自定义输入，确认后提交），答案通过决策的 `updatedInput`
+   写回；浮岛未应答时 flavor-code 自动退回终端提问，两端互为兜底。
 
 全局插件目录对所有项目生效，**无需在每个项目里 `flavor init` 或做任何配置**。
 若项目里同时存在 `flavor init` 安装的内置 `codeisland` 插件，浮岛会自动对
@@ -54,6 +57,7 @@ flavor-code (CLI)
         → Flavor Island (Electron)
           → 实时更新浮岛 UI（状态色 / 动效 / 会话列表）
           → 审批/问答决策写回 socket → bridge 转成 hook decision
+            （AskUserQuestion 的答案随 updatedInput 回传给工具）
 ```
 
 ## 平台差异

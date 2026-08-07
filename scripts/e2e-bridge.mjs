@@ -6,6 +6,7 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const { createHookServer } = require('../src/server/hookServer.js');
+const { buildAllowResponse } = require('../src/core/askQuestion.js');
 
 const PIPE = `\\\\.\\pipe\\flavor-island-e2e-${process.pid}`;
 const received = [];
@@ -15,7 +16,8 @@ const server = createHookServer({
   onEvent: (e) => { received.push(e); },
   onPermission: async (e) => { received.push(e); return 'allow'; },
   onQuestion: () => null,
-  onAskUserQuestion: async () => null,
+  // Answer the AskUserQuestion like the island UI would (allow + answers).
+  onAskUserQuestion: async (e) => { received.push(e); return buildAllowResponse(e, { 'Pick one?': 'Option A' }); },
 });
 await server.start();
 console.log('server listening on', PIPE);
@@ -52,17 +54,36 @@ const r3 = await runBridge({
 console.log('PermissionRequest bridge exit:', r3.code, 'stdout:', r3.stdout.trim());
 if (r3.stderr.trim()) console.log('bridge stderr:', r3.stderr.trim());
 
+// 4. Blocking AskUserQuestion -> island answers -> updatedInput carries answers
+// back in the hook-payload shape flavor-code's bus validates.
+const r4 = await runBridge({
+  version: 1, type: 'PermissionRequest',
+  payload: {
+    tool: 'AskUserQuestion',
+    input: { questions: [{ question: 'Pick one?', header: 'Choice', options: [{ label: 'Option A', description: 'a' }, { label: 'Option B', description: 'b' }] }] },
+    agent: 'main',
+  },
+});
+console.log('AskUserQuestion bridge exit:', r4.code, 'stdout:', r4.stdout.trim());
+if (r4.stderr.trim()) console.log('bridge stderr:', r4.stderr.trim());
+
 await new Promise((r) => setTimeout(r, 100));
 console.log('events received by island:');
 for (const e of received) {
   console.log(' -', e.eventName, '| tool:', e.toolName, '| cwd:', e.rawJSON.cwd, '| prompt:', e.rawJSON.prompt, '| desc:', e.toolDescription);
 }
 
-const ok = received.length === 3
+const askDecision = JSON.parse(r4.stdout);
+const ok = received.length === 4
   && received[0].rawJSON.cwd === 'C:\\proj\\flavor-code'
   && received[1].rawJSON.prompt === 'build the island'
   && received[2].toolName === 'Shell'
-  && JSON.parse(r3.stdout).decision === 'allow';
+  && received[3].toolName === 'AskUserQuestion'
+  && JSON.parse(r3.stdout).decision === 'allow'
+  && askDecision.decision === 'allow'
+  && askDecision.updatedInput.tool === 'AskUserQuestion'
+  && askDecision.updatedInput.agent === 'main'
+  && askDecision.updatedInput.input.answers['Pick one?'] === 'Option A';
 await server.stop();
 console.log(ok ? 'E2E OK' : 'E2E FAILED');
 process.exit(ok ? 0 : 1);
