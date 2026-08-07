@@ -1,0 +1,120 @@
+'use strict';
+
+// Pure view-model: turns raw session state into the rows the island renders.
+// Kept dependency-free so it runs in both Node (tests) and the renderer.
+
+const STATUS_PRIORITY = {
+  waitingApproval: 5,
+  waitingQuestion: 4,
+  running: 3,
+  processing: 2,
+  idle: 0,
+};
+
+function basename(p) {
+  if (!p) return null;
+  const parts = String(p).replace(/\\/g, '/').replace(/\/+$/, '').split('/');
+  return parts[parts.length - 1] || null;
+}
+
+function statusLabel(session) {
+  switch (session.status) {
+    case 'waitingApproval':
+      return 'Needs approval';
+    case 'waitingQuestion':
+      return 'Question';
+    case 'running':
+      return session.currentTool ? `Running · ${session.currentTool}` : 'Running';
+    case 'processing':
+      return 'Thinking…';
+    case 'idle':
+    default:
+      return 'Idle';
+  }
+}
+
+function mascotStateFor(status) {
+  switch (status) {
+    case 'waitingApproval':
+    case 'waitingQuestion':
+      return 'waiting';
+    case 'running':
+      return 'running';
+    case 'processing':
+      return 'processing';
+    default:
+      return 'idle';
+  }
+}
+
+// Tool category color key, mirroring CodeIsland's toolStatusColor accents so
+// each tool family reads at a glance (shell green, edit blue, read yellow,
+// search purple, agent orange, destructive red).
+const TOOL_KEY_MAP = {
+  shell: 'shell', bash: 'shell', command: 'shell', exec: 'shell',
+  write: 'write', edit: 'write', applypatch: 'write', copy: 'write', mkdir: 'write', registertool: 'write',
+  read: 'read', list: 'read', skillresource: 'read', lsphover: 'read', lspdiagnostics: 'read', lspfindrefs: 'read',
+  grep: 'search', glob: 'search', search: 'search',
+  task: 'agent', agent: 'agent', taskplan: 'agent', taskupdate: 'agent',
+  webfetch: 'web', websearch: 'web', fetch: 'web', network: 'web',
+  delete: 'destructive', move: 'destructive', removetool: 'destructive',
+};
+
+function toolKeyFor(toolName) {
+  if (typeof toolName !== 'string' || !toolName) return null;
+  if (toolName.startsWith('mcp__')) return 'web';
+  return TOOL_KEY_MAP[toolName.toLowerCase()] || 'tool';
+}
+
+function titleFor(id, session) {
+  return basename(session.cwd) || (typeof id === 'string' ? id.slice(0, 8) : 'session');
+}
+
+function renderModel(state = {}) {
+  const sessions = state.sessions || {};
+  const entries = Object.entries(sessions);
+
+  const rows = entries
+    .map(([id, session]) => ({
+      id,
+      source: session.source || 'flavor',
+      icon: session.source || 'flavor',
+      title: titleFor(id, session),
+      statusKey: session.status || 'idle',
+      statusLabel: statusLabel(session),
+      tool: session.currentTool || null,
+      toolKey: toolKeyFor(session.currentTool),
+      toolDescription: session.toolDescription || null,
+      pending: session.status === 'waitingApproval' || session.status === 'waitingQuestion',
+      lastActivity: session.lastActivity || 0,
+      lastAssistantMessage: session.lastAssistantMessage || null,
+    }))
+    .sort((a, b) => {
+      const pa = STATUS_PRIORITY[a.statusKey] ?? 1;
+      const pb = STATUS_PRIORITY[b.statusKey] ?? 1;
+      if (pb !== pa) return pb - pa;
+      return b.lastActivity - a.lastActivity;
+    });
+
+  const top = rows[0];
+  // Quiet mode: the island only expands when a session needs a human decision —
+  // authorization (waitingApproval) or information input (waitingQuestion).
+  // Ordinary activity (running/processing/idle) is tracked silently and stays
+  // collapsed so the island isn't noisy.
+  const hasPending = rows.some(
+    (r) => r.statusKey === 'waitingApproval' || r.statusKey === 'waitingQuestion'
+  );
+
+  return {
+    collapsed: !hasPending,
+    count: rows.length,
+    rows,
+    // Quiet mode collapses the panel until a decision is pending, but the
+    // always-visible pill still reflects the top session's status so the mascot
+    // bounces whenever the agent is actively working — running/processing —
+    // not only when waiting for the user.
+    mascotState: top ? mascotStateFor(top.statusKey) : 'idle',
+  };
+}
+
+module.exports = { renderModel, STATUS_PRIORITY, toolKeyFor };

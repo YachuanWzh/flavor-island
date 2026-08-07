@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; media-src 'self'; style-src 'self' 'unsafe-inline';" />
+  <link rel="stylesheet" href="island.css" />
+  <title>Flavor Island</title>
+</head>
+<body>
+  <div id="island" class="island collapsed">
+    <div id="pill" class="pill">
+      <canvas id="mascot" class="mascot" width="48" height="48"></canvas>
+      <span id="pill-status" class="pill-status">Flavor Island</span>
+      <span class="pill-dots"><i></i><i></i><i></i></span>
+      <span id="pill-count" class="pill-count"></span>
+    </div>
+    <div id="panel" class="panel"></div>
+  </div>
+  <script src="mascot.js"></script>
+  <script src="island.js"></script>
+</body>
+</html>

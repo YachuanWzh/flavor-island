@@ -1,0 +1,55 @@
+{
+  "name": "flavor-island",
+  "version": "0.1.0",
+  "author": "YachuanWzh",
+  "description": "Real-time AI coding agent status island for Windows & macOS, native to flavor-code. A flavor-code-flavored port of CodeIsland / CodeIslandWin.",
+  "main": "src/main/main.js",
+  "scripts": {
+    "test": "node --test",
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder --win",
+    "dist:mac": "electron-builder --mac",
+    "installer": "electron-builder --win nsis"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^42.7.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "dev.flavorisland.desktop",
+    "productName": "Flavor Island",
+    "files": [
+      "src/**/*",
+      "!**/*.test.js"
+    ],
+    "asarUnpack": [
+      "src/core/**"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "src/assets/flavor.png"
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "icon": "src/assets/flavor.png",
+      "category": "public.app-category.developer-tools"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  },
+  "allowScripts": {
+    "electron@42.7.0": true
+  }
+}
