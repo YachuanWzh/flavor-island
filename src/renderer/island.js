@@ -188,6 +188,8 @@ function optionRow(label, description, multi, selected) {
 function setCustomChecked(customEl, checked) {
   const box = customEl.querySelector('.q-custom-check');
   if (box) box.checked = checked;
+  // Keep the row's solid "counts as answer" treatment in sync with the box.
+  customEl.classList.toggle('checked', !!checked);
 }
 
 // Final custom-input item: checkbox on the left, single-line text input on the
@@ -197,7 +199,7 @@ function setCustomChecked(customEl, checked) {
 // input accepts single-line text regardless of the checkbox state.
 function customRow(q, qd, onChanged) {
   const row = document.createElement('div');
-  row.className = 'q-custom';
+  row.className = `q-custom${qd.other ? ' checked' : ''}`;
 
   const label = document.createElement('label');
   label.className = 'q-custom-check-label';
@@ -211,6 +213,7 @@ function customRow(q, qd, onChanged) {
     qd.other = e.target.checked;
     // A checked custom box takes over from the picked option for single-select.
     if (!q.multiSelect && qd.other) qd.value = null;
+    row.classList.toggle('checked', qd.other);
     onChanged();
   };
   label.appendChild(box);
@@ -258,6 +261,8 @@ function render({ model, pending, sounds }) {
   const top = model.rows[0];
   pillStatusEl.className = 'pill-status';
   if (!top) {
+    // Brand/idle reading takes the pixel display face (see .pill-status.brand).
+    pillStatusEl.classList.add('brand');
     pillStatusEl.textContent = 'Flavor Island';
   } else if (top.tool) {
     // Active tool reads like CodeIsland's compact wing: colored tool name plus
@@ -278,10 +283,14 @@ function render({ model, pending, sounds }) {
   panelEl.classList.toggle('settled', panelEl.dataset.sig === panelSig);
   panelEl.dataset.sig = panelSig;
   panelEl.innerHTML = '';
-  for (const row of model.rows) {
+  const stagger = !panelEl.classList.contains('settled');
+  model.rows.forEach((row, i) => {
     const pend = row.pending ? pendingForSession(pending, row.id) : null;
     const div = document.createElement('div');
     div.className = `row s-${row.statusKey}`;
+    // Orchestrated panel entry: fresh layouts cascade in 30ms apart (capped so
+    // long lists don't drag); settled re-renders skip animation entirely.
+    if (stagger) div.style.animationDelay = `${Math.min(i, 6) * 30}ms`;
     // While a tool runs, the status chip shows the tool in its category color
     // instead of the plain status text.
     const statusText = row.tool || row.statusLabel;
@@ -325,7 +334,7 @@ function render({ model, pending, sounds }) {
       buildAskCard(div, pend);
     }
     panelEl.appendChild(div);
-  }
+  });
 
   // Ask main to fit the window to content. The island now fills the window
   // (height:100%) so its layout box equals the current window height, not the

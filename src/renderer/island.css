@@ -5,12 +5,12 @@
 ::-webkit-scrollbar { width: 0; height: 0; display: none; }
 
 :root {
-  --bg: #050507;
-  --bg-soft: #14151c;
-  --bg-inset: #0d0e14;
-  --line: #23242f;
+  --bg: #0c0a08;
+  --bg-soft: #171310;
+  --bg-inset: #100d0b;
+  --line: #262119;
   --fg: #eceef4;
-  --muted: #8b90a0;
+  --ash: #9a938a;
   /* Tool category accents — mirror CodeIsland's toolStatusColor palette. */
   --c-shell: #66ff80;
   --c-write: #80b3ff;
@@ -20,11 +20,30 @@
   --c-web: #66e0f2;
   --c-destructive: #ff6666;
   --c-tool: #9aa2b5;
-  --accent: #4cd964;
+  /* Heat-scale accents: ember = cooking (running, the mascot's own body color),
+     amber = waiting on the chef, mint = safe/approved. */
+  --ember: #ff6a3d;
+  --mint: #4cd964;
   --warn: #ffb340;
   --danger: #ff6666;
   --radius: 20px;
   --font: "Cascadia Code", "SF Mono", "Consolas", ui-monospace, monospace;
+  --font-display: "Silkscreen", var(--font);
+}
+
+/* Pixel display face (OFL, vendored) — brand moments only: island name,
+   question headers, count badge. */
+@font-face {
+  font-family: "Silkscreen";
+  src: url("../assets/fonts/silkscreen-400.woff2") format("woff2");
+  font-weight: 400;
+  font-display: block;
+}
+@font-face {
+  font-family: "Silkscreen";
+  src: url("../assets/fonts/silkscreen-700.woff2") format("woff2");
+  font-weight: 700;
+  font-display: block;
 }
 
 html, body {
@@ -61,24 +80,24 @@ html, body {
 }
 .pill:active { cursor: grabbing; }
 
-/* State glows: green while the agent works, amber pulse while it waits for a
-   human decision. */
+/* State glows read as heat: ember while the agent cooks, amber hard-blink
+   while it waits for a human decision. */
 .pill.state-running {
-  border-color: rgba(76,217,100,0.65);
-  box-shadow: 0 0 16px rgba(76,217,100,0.35), 0 4px 18px rgba(0,0,0,0.55);
+  border-color: rgba(255,106,61,0.65);
+  box-shadow: 0 0 16px rgba(255,106,61,0.35), 0 4px 18px rgba(0,0,0,0.55);
 }
 .pill.state-processing {
-  border-color: rgba(76,217,100,0.4);
-  box-shadow: 0 0 10px rgba(76,217,100,0.2), 0 4px 18px rgba(0,0,0,0.55);
+  border-color: rgba(255,106,61,0.4);
+  box-shadow: 0 0 10px rgba(255,106,61,0.2), 0 4px 18px rgba(0,0,0,0.55);
 }
 .pill.state-waiting {
   border-color: var(--warn);
-  animation: waiting-pulse 1.6s ease-in-out infinite;
+  animation: waiting-pulse 1.2s steps(2, jump-none) infinite;
 }
 
 @keyframes waiting-pulse {
-  0%, 100% { box-shadow: 0 0 6px rgba(255,179,64,0.25), 0 4px 18px rgba(0,0,0,0.55); }
-  50% { box-shadow: 0 0 22px rgba(255,179,64,0.55), 0 4px 18px rgba(0,0,0,0.55); }
+  0%, 100% { box-shadow: 0 0 6px rgba(255,179,64,0.2), 0 4px 18px rgba(0,0,0,0.55); }
+  50% { box-shadow: 0 0 22px rgba(255,179,64,0.6), 0 4px 18px rgba(0,0,0,0.55); }
 }
 
 /* Pixel mascot: drawn live on canvas (sleep / typing / startled scenes in
@@ -89,10 +108,10 @@ html, body {
   flex-shrink: 0;
 }
 .pill.state-idle .mascot { opacity: 0.75; }
-/* While working, the typing mascot gets a green glow. */
+/* While cooking, the typing mascot gets an ember glow matching the pill. */
 .pill.state-running .mascot,
 .pill.state-processing .mascot {
-  filter: drop-shadow(0 0 4px rgba(76,217,100,0.8));
+  filter: drop-shadow(0 0 4px rgba(255,106,61,0.8));
 }
 /* Waiting: amber glow around the startled jumper. */
 .pill.state-waiting .mascot {
@@ -107,8 +126,15 @@ html, body {
   text-overflow: ellipsis;
   max-width: 320px;
 }
+/* Brand/idle reading of the pill takes the pixel face; tool descriptions
+   (longer, denser) stay on the monospace body face. */
+.pill-status.brand {
+  font-family: var(--font-display);
+  font-size: 10px;
+  letter-spacing: 0.5px;
+}
 .pill.state-waiting .pill-status { color: var(--warn); }
-.pill.state-processing .pill-status { color: var(--muted); }
+.pill.state-processing .pill-status { color: var(--ash); }
 /* Tool-colored status text while a tool runs. */
 .pill-status.tk-shell { color: var(--c-shell); }
 .pill-status.tk-write { color: var(--c-write); }
@@ -124,7 +150,7 @@ html, body {
 .pill.state-processing .pill-dots { display: inline-flex; }
 .pill-dots i {
   width: 3px; height: 3px;
-  background: var(--accent);
+  background: var(--ember);
   opacity: 0.25;
   animation: dot-blink 0.9s steps(2, jump-none) infinite;
 }
@@ -136,10 +162,11 @@ html, body {
 }
 
 .pill-count {
+  font-family: var(--font-display);
   font-size: 10px;
   color: var(--bg);
   background: var(--warn);
-  border-radius: 999px;
+  border-radius: 4px;
   padding: 1px 6px;
   min-width: 16px;
   text-align: center;
@@ -180,6 +207,8 @@ html, body {
   from { opacity: 0; transform: translateY(-5px); }
   to { opacity: 1; transform: translateY(0); }
 }
+/* JS assigns a small per-row delay for a staggered, orchestrated panel entry
+   (capped at six rows) — only when the layout is genuinely new. */
 
 .row {
   background: var(--bg-soft);
@@ -195,8 +224,8 @@ html, body {
   border-left-color: var(--warn);
   background: linear-gradient(0deg, rgba(255,179,64,0.06), rgba(255,179,64,0.06)), var(--bg-soft);
 }
-.row.s-running { border-left-color: var(--c-shell); }
-.row.s-processing { border-left-color: var(--accent); }
+.row.s-running { border-left-color: var(--ember); }
+.row.s-processing { border-left-color: var(--ember); }
 
 .row-head { display: flex; align-items: center; gap: 8px; }
 .row-icon { width: 16px; height: 16px; image-rendering: pixelated; flex-shrink: 0; }
@@ -208,7 +237,7 @@ html, body {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.row-status { font-size: 10px; color: var(--muted); flex-shrink: 0; }
+.row-status { font-size: 10px; color: var(--ash); flex-shrink: 0; }
 .row.s-waitingApproval .row-status, .row.s-waitingQuestion .row-status { color: var(--warn); }
 /* Tool-colored status chip while a tool runs. */
 .row-status.tk-shell { color: var(--c-shell); }
@@ -222,7 +251,7 @@ html, body {
 
 .row-desc {
   font-size: 11px;
-  color: var(--muted);
+  color: var(--ash);
   white-space: pre-wrap;
   word-break: break-word;
   /* Show a few lines inline; scroll within for long commands instead of
@@ -238,30 +267,33 @@ html, body {
   font-size: 11px;
   font-weight: 600;
   border: none;
-  border-radius: 9px;
+  border-radius: 7px;
   padding: 7px 8px;
   cursor: pointer;
-  transition: filter 0.12s ease, transform 0.06s ease, opacity 0.15s ease;
+  /* 8-bit press: hard-edged shadow snaps down instead of easing. */
+  box-shadow: 0 2px 0 rgba(0,0,0,0.6);
+  transition: filter 0.12s ease, transform 0.08s steps(2), box-shadow 0.08s steps(2), opacity 0.15s ease;
 }
 .btn:hover { filter: brightness(1.15); }
-.btn:active { transform: translateY(1px); }
+.btn:active { transform: translateY(2px); box-shadow: 0 0 0 rgba(0,0,0,0.6); }
 .btn:disabled {
   opacity: 0.4;
   cursor: default;
   filter: none;
+  box-shadow: none;
 }
 .btn:disabled:active { transform: none; }
-.btn-allow { background: var(--accent); color: #06220d; }
+.btn-allow { background: var(--mint); color: #06220d; }
 /* "Allow all" is a softer, outlined green to read as a broader, stickier choice
    than the plain one-shot Allow. */
 .btn-allow-all {
   background: transparent;
-  color: var(--accent);
-  border: 1px solid var(--accent);
+  color: var(--mint);
+  border: 1px solid var(--mint);
 }
 .btn-deny { background: rgba(255,102,102,0.14); color: var(--danger); border: 1px solid rgba(255,102,102,0.45); }
 .btn-skip { background: #23242f; color: var(--fg); }
-.btn-submit { background: var(--accent); color: #06220d; }
+.btn-submit { background: var(--mint); color: #06220d; }
 
 /* AskUserQuestion card */
 .question { display: flex; flex-direction: column; gap: 5px; margin-top: 6px; }
@@ -273,14 +305,15 @@ html, body {
 /* Header reads as a small accent chip instead of loose uppercase text. */
 .q-header {
   align-self: flex-start;
-  font-size: 9.5px;
-  color: var(--accent);
-  background: rgba(76,217,100,0.1);
-  border: 1px solid rgba(76,217,100,0.35);
+  font-family: var(--font-display);
+  font-size: 10px;
+  color: var(--ember);
+  background: rgba(255,106,61,0.1);
+  border: 1px solid rgba(255,106,61,0.35);
   border-radius: 999px;
-  padding: 1px 8px;
+  padding: 2px 8px;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 1px;
 }
 .q-text {
   font-size: 12px;
@@ -323,15 +356,19 @@ html, body {
   transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
 }
 .opt:hover .opt-mark { border-color: #6b7390; }
-.opt.selected .opt-mark { border-color: var(--accent); }
+.opt.selected .opt-mark { border-color: var(--mint); animation: mark-pop 0.16s steps(2); }
+@keyframes mark-pop {
+  from { transform: scale(0.6); }
+  to { transform: scale(1); }
+}
 /* …filled with an inset ring when picked. */
 .opt:not(.opt-multi).selected .opt-mark {
-  background: var(--accent);
+  background: var(--mint);
   box-shadow: inset 0 0 0 2.5px var(--bg-inset);
 }
 /* Multi-select uses a rounded square with a check instead. */
 .opt-multi .opt-mark { border-radius: 4px; }
-.opt-multi.selected .opt-mark { background: var(--accent); }
+.opt-multi.selected .opt-mark { background: var(--mint); }
 .opt-multi.selected .opt-mark::after {
   content: '✓';
   font-size: 9px;
@@ -342,7 +379,7 @@ html, body {
 .opt-body { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .opt-label { font-size: 11px; font-weight: 600; color: var(--fg); }
 .opt.selected .opt-label { color: #d9ffe2; }
-.opt-desc { font-size: 9.5px; line-height: 1.35; color: var(--muted); }
+.opt-desc { font-size: 9.5px; line-height: 1.35; color: var(--ash); }
 .q-input {
   font-family: var(--font);
   font-size: 11px;
@@ -355,7 +392,9 @@ html, body {
   outline: none;
   transition: border-color 0.15s ease;
 }
-.q-input:focus { border-color: var(--accent); }
+.q-input:focus { border-color: var(--mint); }
+.q-input { caret-color: var(--mint); }
+.q-input::placeholder { color: #8a8378; }
 /* Final custom-input item: checkbox on the left, single-line input on the
    right, styled as a dashed sibling of the option rows so it reads as "one
    more option". The checkbox only gates whether the typed text counts as the
@@ -365,12 +404,27 @@ html, body {
   align-items: center;
   gap: 8px;
   margin-top: 2px;
-  border: 1px dashed #39415a;
+  /* Amber dashes read as "waiting on you"; inset bg lifts it off the panel so
+     the row reads as a real option instead of a stray outline. */
+  background: var(--bg-inset);
+  border: 1px dashed rgba(255,179,64,0.45);
   border-radius: 10px;
-  padding: 4px 10px;
-  transition: border-color 0.15s ease;
+  padding: 6px 10px;
+  transition: border-color 0.15s ease, background 0.15s ease;
 }
-.q-custom:focus-within { border-color: var(--accent); }
+.q-custom:hover { border-color: rgba(255,179,64,0.7); }
+/* Checked: dashes solidify in the same warm amber family — the row stays an
+   input, not a selected option, so only the checkbox itself carries mint. */
+.q-custom.checked {
+  border-style: solid;
+  border-color: rgba(255,179,64,0.7);
+  background: rgba(255,179,64,0.06);
+}
+/* Focus: ember solid border matches the island-wide focus language. */
+.q-custom:focus-within {
+  border-style: solid;
+  border-color: var(--ember);
+}
 .q-custom-check-label {
   display: inline-flex;
   align-items: center;
@@ -379,10 +433,10 @@ html, body {
   cursor: pointer;
 }
 .q-custom-check {
-  width: 13px;
-  height: 13px;
+  width: 14px;
+  height: 14px;
   margin: 0;
-  accent-color: var(--accent);
+  accent-color: var(--mint);
   cursor: pointer;
 }
 .q-custom .q-input {
@@ -394,3 +448,24 @@ html, body {
   border: none;
 }
 .q-custom .q-input:focus { border-color: transparent; }
+
+/* Keyboard focus must stay visible on the always-on-top window. */
+.btn:focus-visible,
+.opt:focus-visible,
+.q-input:focus-visible,
+.q-custom-check:focus-visible {
+  outline: 2px solid var(--ember);
+  outline-offset: 1px;
+}
+/* The custom row's input sits inside a container that already signals focus via
+   :focus-within — a second outline here reads as a double border. */
+.q-custom .q-input:focus-visible { outline: none; }
+
+/* Honor the OS reduced-motion preference: freeze pulses, blinks and entries. */
+@media (prefers-reduced-motion: reduce) {
+  .pill.state-waiting,
+  .pill-dots i,
+  .row,
+  .opt.selected .opt-mark { animation: none !important; }
+  * { transition-duration: 0.01ms !important; }
+}
