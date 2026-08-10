@@ -14,7 +14,9 @@ const path = require('node:path');
 // (see flavor-code src/production.ts). The global tier is the right home for
 // a companion app: one install covers all workspaces.
 
-const PLUGIN_FILES = ['flavor-plugin.json', 'activate.mjs', 'bridge.mjs'];
+// NOTE: bridge.mjs imports eventTransform.mjs via a relative path, so it must
+// ship alongside — omitting it makes the plugin fail to load in flavor-code.
+const PLUGIN_FILES = ['flavor-plugin.json', 'activate.mjs', 'bridge.mjs', 'eventTransform.mjs'];
 
 function pluginInstallDir(home = os.homedir()) {
   return path.join(home, '.flavor-code', 'plugins', 'flavor-island');

@@ -63,6 +63,10 @@ export function activate(context) {
     "SessionStart", "SessionEnd", "UserPromptSubmit", "Stop",
     "SubagentStart", "SubagentStop", "PreToolUse", "PostToolUse",
     "PostToolUseFailure", "PermissionRequest", "PreCompact", "Notification",
+    // Model-call and planning lifecycle — the island shows the model name and a
+    // distinct "Planning…" state from these, plus PostCompact to recover from
+    // the 'Compacting context…' state PreCompact sets.
+    "BeforeModelCall", "AfterModelCall", "BeforePlan", "AfterPlan", "PostCompact",
   ];
   const disposers = [];
   for (const eventName of names) {

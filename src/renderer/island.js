@@ -14,6 +14,10 @@ const panelEl = document.getElementById('panel');
 const mascot = createMascot(document.getElementById('mascot'));
 mascot.start();
 
+// Honor the OS reduced-motion setting for the pill width tween too (the CSS
+// media query already flattens stylesheet animations).
+const REDUCED_MOTION = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
 // Vertical room reserved below the content so the drop shadow renders fully
 // instead of being clipped into a hard line by body{overflow:hidden}.
 const SHADOW_PAD = 28;
@@ -52,6 +56,72 @@ function pendingForSession(pending, sessionId) {
   return pending.find((p) => p.sessionId === sessionId) || null;
 }
 
+function fmtTime(ts) {
+  const d = new Date(ts);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+function fmtDuration(ms) {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  return `${Math.floor(total / 60)}m ${total % 60}s`;
+}
+
+// Build the expandable detail block for one row. Only non-empty fields are
+// emitted (empty sessions get a quiet placeholder); all text passes through
+// escapeHtml because history descriptions come straight from tool inputs.
+function buildRowDetail(row) {
+  const parts = [];
+  const scrollBlock = (text) => `<div class="detail-scroll">${escapeHtml(text)}</div>`;
+  const addRow = (label, valueHtml, extra = '') => {
+    parts.push(`<div class="detail-row ${extra}"><span class="detail-label">${label}</span>${valueHtml}</div>`);
+  };
+
+  if (row.model) addRow('Model', `<span class="detail-value">${escapeHtml(row.model)}</span>`);
+  if (row.startTime) {
+    addRow('Running', `<span class="detail-value detail-duration" data-start-time="${row.startTime}">${fmtDuration(Date.now() - row.startTime)}</span>`);
+  }
+  if (row.lastUserPrompt) addRow('Prompt', scrollBlock(row.lastUserPrompt));
+  if (row.lastAssistantMessage) addRow('Reply', scrollBlock(row.lastAssistantMessage));
+  if (row.lastToolError) addRow('Last error', scrollBlock(row.lastToolError), 'detail-error');
+  if (row.lastModelError) addRow('Model error', scrollBlock(row.lastModelError), 'detail-error');
+  // Safety net: even though the bridge truncates tool output, never render
+  // more than 2000 chars of it into the detail panel.
+  if (row.lastToolOutput) {
+    addRow('Last output', `<div class="detail-scroll detail-pre">${escapeHtml(String(row.lastToolOutput).slice(0, 2000))}</div>`);
+  }
+
+  const badges = [];
+  if (row.failureCount > 0) badges.push(`<span class="badge badge-fail">Failures: ${row.failureCount}</span>`);
+  if (row.interrupted) badges.push(`<span class="badge badge-int">Interrupted</span>`);
+  if (badges.length) parts.push(`<div class="detail-badges">${badges.join('')}</div>`);
+
+  if (row.history && row.history.length) {
+    // Newest first: the timeline reads top-down as "what just happened".
+    const lines = row.history.slice().reverse().map((h) => {
+      const desc = h.description ? ` · ${h.description}` : '';
+      return `<div class="hist-line ${h.success ? 'hist-ok' : 'hist-fail'}">`
+        + `<span class="hist-mark">${h.success ? '✓' : '✗'}</span>`
+        + `<span class="hist-body" title="${escapeHtml(h.description || '')}">${escapeHtml(h.tool)}${escapeHtml(desc)}</span>`
+        + `<span class="hist-time">${fmtTime(h.timestamp)}</span></div>`;
+    }).join('');
+    parts.push(`<div class="detail-row"><span class="detail-label">History</span><div class="detail-history">${lines}</div></div>`);
+  }
+
+  if (!parts.length) return '<div class="detail-empty">No details yet</div>';
+  return parts.join('');
+}
+
+function ensureDurationTimer() {
+  if (durationTimer) return;
+  // Refresh only the duration line in place; a full re-render on a timer would
+  // fight the settled-signature animation suppression and the resize loop.
+  durationTimer = setInterval(() => {
+    const el = document.querySelector('.detail-duration');
+    if (el && el.dataset.startTime) el.textContent = fmtDuration(Date.now() - Number(el.dataset.startTime));
+  }, 30_000);
+}
+
 // Draft answers for in-flight AskUserQuestion cards, keyed by pending key, so the
 // user's selections survive the periodic state re-renders. Each draft is an array
 // (one entry per question): { value, set: string[], other, otherText }.
@@ -59,6 +129,20 @@ const askDrafts = new Map();
 
 // Last height sent to main for a window resize — guards against no-op resizes.
 let lastResizeH = 0;
+
+// Expandable session details: at most one row's detail block is open, keyed by
+// row id. Main knows nothing about this state — the renderer re-applies it on
+// every state push by re-rendering the open block.
+let openDetailId = null;
+// Row-id set from the previous render; when the set changes (a session appears
+// or disappears) the open detail no longer maps to a real row, so reset it.
+let lastRowSet = '';
+// The most recent state push, kept so a detail toggle can re-render the panel
+// without waiting for the next push from main.
+let lastRenderState = null;
+// One shared timer refreshes the "Running Xm Ys" line while a detail is open —
+// state pushes alone are too sparse to make the duration tick.
+let durationTimer = null;
 
 function draftFor(pend) {
   let d = askDrafts.get(pend.key);
@@ -248,15 +332,22 @@ function textInput(qd, onChanged) {
 }
 
 function render({ model, pending, sounds }) {
+  // Keep the latest push so a detail toggle can re-render without a new push.
+  lastRenderState = { model, pending, sounds };
   (sounds || []).forEach(playSound);
 
   // Pill
   islandEl.classList.toggle('collapsed', model.collapsed);
   pillEl.className = `pill state-${model.mascotState}`;
   mascot.setState(model.mascotState);
-  // Quiet mode: only surface the session count while the island is expanded for a
-  // pending decision — no badge churn during background activity.
-  pillCountEl.textContent = !model.collapsed && model.count > 0 ? String(model.count) : '';
+  // Session-count badge: always visible once any session exists (collapsed or
+  // not) so multi-session navigation doesn't require expanding first.
+  pillCountEl.textContent = model.count > 0 ? String(model.count) : '';
+
+  // Main debounces tool chips, but a reveal/swap still changes the pill text
+  // and thus its width — tween the width so the pill stretches instead of
+  // snapping (a hard jump reads as flicker on the transparent window).
+  const pillW0 = pillEl.getBoundingClientRect().width;
 
   const top = model.rows[0];
   pillStatusEl.className = 'pill-status';
@@ -276,13 +367,38 @@ function render({ model, pending, sounds }) {
     pillStatusEl.textContent = top.statusLabel;
   }
 
+  if (!REDUCED_MOTION && typeof pillEl.animate === 'function') {
+    const pillW1 = pillEl.getBoundingClientRect().width;
+    if (Math.abs(pillW1 - pillW0) > 2) {
+      pillEl.animate(
+        [{ width: `${pillW0}px` }, { width: `${pillW1}px` }],
+        { duration: 180, easing: 'cubic-bezier(0.2, 0, 0, 1)' }
+      );
+    }
+  }
+
   // Panel rows. Rebuilding the DOM replays every row's entry animation, which
   // flashes on the transparent window — suppress it while the row set (ids +
   // statuses) is unchanged, so only genuinely new layouts animate in.
   const panelSig = `${model.collapsed ? 'c' : 'e'}|${model.rows.map((r) => `${r.id}:${r.statusKey}`).join(',')}`;
   panelEl.classList.toggle('settled', panelEl.dataset.sig === panelSig);
   panelEl.dataset.sig = panelSig;
+  // When the row set changes (session added/removed), a previously opened
+  // detail may point at a stale row — close it and re-key the open state.
+  const rowSet = model.rows.map((r) => r.id).join('\u0001');
+  if (rowSet !== lastRowSet) {
+    lastRowSet = rowSet;
+    openDetailId = null;
+  }
   panelEl.innerHTML = '';
+  // Multi-session navigation: a small heading names the session count so the
+  // expanded panel reads as a session list rather than a single status card.
+  if (model.count > 0) {
+    const head = document.createElement('div');
+    head.className = 'panel-head';
+    head.textContent = `${model.count} session${model.count === 1 ? '' : 's'}`;
+    panelEl.appendChild(head);
+  }
   const stagger = !panelEl.classList.contains('settled');
   model.rows.forEach((row, i) => {
     const pend = row.pending ? pendingForSession(pending, row.id) : null;
@@ -298,14 +414,27 @@ function render({ model, pending, sounds }) {
     // The ask card renders the question text itself — the row description
     // would just duplicate the first question above the card.
     const showDesc = row.toolDescription && !(pend && pend.kind === 'askUserQuestion');
+    const isOpen = row.id === openDetailId;
+    div.classList.toggle('open', isOpen);
     div.innerHTML = `
       <div class="row-head">
         <img class="row-icon" src="../assets/flavor.png" alt="" />
         <span class="row-title">${escapeHtml(row.title)}</span>
         <span class="${statusClass}">${escapeHtml(statusText)}</span>
+        <span class="detail-chevron">▸</span>
       </div>
       ${showDesc ? `<div class="row-desc">${escapeHtml(row.toolDescription)}</div>` : ''}
+      ${isOpen ? `<div class="row-detail">${buildRowDetail(row)}</div>` : ''}
     `;
+    // Clicking the head toggles the detail block. The permission buttons and
+    // ask-card inputs live outside .row-head (in .actions / ask cards), so
+    // their clicks never reach this handler. Opening one row closes any other
+    // open detail.
+    div.querySelector('.row-head').addEventListener('click', () => {
+      openDetailId = openDetailId === row.id ? null : row.id;
+      rerender();
+    });
+    if (isOpen && row.startTime) ensureDurationTimer();
     if (pend && pend.kind === 'permission') {
       const actions = document.createElement('div');
       actions.className = 'actions';
@@ -357,6 +486,13 @@ function render({ model, pending, sounds }) {
     lastResizeH = h;
     window.flavorIsland.resize(h);
   });
+}
+
+// Re-render with the last state push after a detail toggle. Sounds are dropped
+// so a local click never replays a state-change sound.
+function rerender() {
+  if (!lastRenderState) return;
+  render({ ...lastRenderState, sounds: [] });
 }
 
 // Manual drag by the pill. A CSS -webkit-app-region:drag region would move the

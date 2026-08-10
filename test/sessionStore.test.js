@@ -126,3 +126,113 @@ test('SubagentStart/Stop transition running state', () => {
   assert.equal(s.status, Status.processing);
   assert.equal(s.currentTool, null);
 });
+
+test('newSession initializes tool output/error tracking fields', () => {
+  const s = newSession();
+  assert.equal(s.lastToolOutput, null);
+  assert.equal(s.lastToolError, null);
+  assert.equal(s.failureCount, 0);
+  assert.equal(s.lastModelError, null);
+});
+
+test('PostToolUse stores lastToolOutput from rawJSON.tool_output and clears lastToolError', () => {
+  const sessions = {};
+  reduceEvent(sessions, evt('PreToolUse', { toolName: 'Bash' }));
+  reduceEvent(sessions, evt('PostToolUseFailure', { rawJSON: { tool_error: 'boom' } }));
+  reduceEvent(sessions, evt('PostToolUse', { rawJSON: { tool_output: 'all good' } }));
+  const s = sessions.s1;
+  assert.equal(s.lastToolOutput, 'all good');
+  assert.equal(s.lastToolError, null);
+});
+
+test('PostToolUseFailure sets lastToolError and increments failureCount', () => {
+  const sessions = {};
+  reduceEvent(sessions, evt('PreToolUse', { toolName: 'Edit' }));
+  reduceEvent(sessions, evt('PostToolUseFailure', { rawJSON: { tool_error: 'boom' } }));
+  reduceEvent(sessions, evt('PostToolUseFailure', { rawJSON: { tool_error: 'bang' } }));
+  const s = sessions.s1;
+  assert.equal(s.lastToolError, 'bang');
+  assert.equal(s.failureCount, 2);
+});
+
+test('BeforeModelCall sets processing status, model description, and records model', () => {
+  const sessions = {};
+  reduceEvent(sessions, evt('BeforeModelCall', { rawJSON: { modelId: 'deepseek-v4' } }));
+  const s = sessions.s1;
+  assert.equal(s.status, Status.processing);
+  assert.equal(s.currentTool, null);
+  assert.equal(s.toolDescription, 'Model · deepseek-v4');
+  assert.equal(s.model, 'deepseek-v4');
+});
+
+test('BeforeModelCall reads the bridge-shaped model key', () => {
+  const sessions = {};
+  // The bridge flattens payload.modelId to top-level `model`; the reducer must
+  // accept that shape too (direct modelId still works for other CLIs).
+  reduceEvent(sessions, evt('BeforeModelCall', { rawJSON: { model: 'deepseek-v4' } }));
+  const s = sessions.s1;
+  assert.equal(s.status, Status.processing);
+  assert.equal(s.toolDescription, 'Model · deepseek-v4');
+  assert.equal(s.model, 'deepseek-v4');
+});
+
+test('AfterModelCall clears toolDescription; providerError records lastModelError', () => {
+  const sessions = {};
+  reduceEvent(sessions, evt('BeforeModelCall', { rawJSON: { modelId: 'deepseek-v4' } }));
+  reduceEvent(sessions, evt('AfterModelCall', {
+    rawJSON: { providerError: true, errorMessage: 'rate limited' },
+  }));
+  const s = sessions.s1;
+  assert.equal(s.status, Status.processing);
+  assert.equal(s.currentTool, null);
+  assert.equal(s.toolDescription, null);
+  assert.equal(s.lastModelError, 'rate limited');
+});
+
+test('AfterModelCall without provider error leaves lastModelError untouched', () => {
+  const sessions = {};
+  reduceEvent(sessions, evt('AfterModelCall', { rawJSON: { providerError: false, errorMessage: 'nope' } }));
+  assert.equal(sessions.s1.lastModelError, null);
+});
+
+test('BeforePlan sets planning status; AfterPlan returns to processing', () => {
+  const sessions = {};
+  reduceEvent(sessions, evt('BeforePlan'));
+  const s = sessions.s1;
+  assert.equal(s.status, Status.planning);
+  assert.equal(s.currentTool, null);
+  assert.equal(s.toolDescription, 'Planning…');
+  reduceEvent(sessions, evt('AfterPlan'));
+  assert.equal(s.status, Status.processing);
+  assert.equal(s.currentTool, null);
+  assert.equal(s.toolDescription, null);
+});
+
+test('PostCompact clears the compacting description', () => {
+  const sessions = {};
+  reduceEvent(sessions, evt('PreCompact'));
+  assert.equal(sessions.s1.toolDescription, 'Compacting context…');
+  reduceEvent(sessions, evt('PostCompact'));
+  const s = sessions.s1;
+  assert.equal(s.status, Status.processing);
+  assert.equal(s.currentTool, null);
+  assert.equal(s.toolDescription, null);
+});
+
+test('Stop with stop_reason cancelled marks interrupted (regression for the bug)', () => {
+  const sessions = {};
+  reduceEvent(sessions, evt('Stop', { rawJSON: { stop_reason: 'cancelled' } }));
+  assert.equal(sessions.s1.interrupted, true);
+});
+
+test('waitingApproval suppresses BeforeModelCall/BeforePlan status changes', () => {
+  const sessions = {};
+  reduceEvent(sessions, evt('PreToolUse', { toolName: 'Bash', toolDescription: 'npm test' }));
+  sessions.s1.status = Status.waitingApproval;
+  reduceEvent(sessions, evt('BeforeModelCall', { rawJSON: { modelId: 'deepseek-v4' } }));
+  assert.equal(sessions.s1.status, Status.waitingApproval);
+  assert.equal(sessions.s1.toolDescription, 'npm test');
+  reduceEvent(sessions, evt('BeforePlan'));
+  assert.equal(sessions.s1.status, Status.waitingApproval);
+  assert.equal(sessions.s1.toolDescription, 'npm test');
+});

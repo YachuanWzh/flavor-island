@@ -7,6 +7,7 @@
 //   win32   -> \\.\pipe\codeisland-<USERNAME>     (override: CODEISLAND_PIPE)
 //   darwin  -> /tmp/codeisland-<uid>.sock         (override: CODEISLAND_SOCKET_PATH)
 import net from "node:net";
+import { transformEvent } from "./eventTransform.mjs";
 
 const PIPE_TIMEOUT_MS = 4000;
 
@@ -34,38 +35,6 @@ function readStdin() {
     process.stdin.on("end", () => resolve(Buffer.concat(chunks)));
     process.stdin.on("error", () => resolve(Buffer.concat(chunks)));
   });
-}
-
-function transform(event) {
-  const payload = event.payload || {};
-  const result = {
-    hook_event_name: event.type,
-    session_id: `flavor-${process.ppid || process.pid}`,
-    _source: "flavor-code",
-    _ppid: process.ppid || process.pid,
-  };
-  if (typeof payload.tool === "string") result.tool_name = payload.tool;
-  if (typeof payload.agent === "string") result.agent_type = payload.agent;
-  if (payload.input && typeof payload.input === "object" && !Array.isArray(payload.input)) {
-    result.tool_input = payload.input;
-    for (const [key, value] of Object.entries(payload.input)) {
-      if (typeof value === "string" && !(key in result)) result[key] = value;
-    }
-  }
-  if (typeof payload.reason === "string") result.message = payload.reason;
-  if (typeof payload.message === "string" && !result.message) result.message = payload.message;
-  if (typeof payload.id === "string") result.agent_id = payload.id;
-  if (typeof payload.description === "string" && !result.message) result.message = payload.description;
-  if (typeof payload.modelId === "string") result.model = payload.modelId;
-  if (typeof payload.iteration === "number") result.message = `iteration ${payload.iteration}`;
-  // flavor-code lifecycle payloads the baked-in bridge drops:
-  //   SessionStart/SessionEnd -> { workspace }  (project title on the island)
-  //   UserPromptSubmit        -> { prompt }     (last user message)
-  //   Stop                    -> { outcome }    (completed/interrupted/…)
-  if (typeof payload.workspace === "string") result.cwd = payload.workspace;
-  if (typeof payload.prompt === "string") result.prompt = payload.prompt;
-  if (typeof payload.outcome === "string") result.stop_reason = payload.outcome;
-  return result;
 }
 
 function toHookDecision(pipeResponse, event) {
@@ -103,7 +72,7 @@ async function main() {
   if (!event || typeof event !== "object" || Array.isArray(event)) process.exit(0);
 
   const blocking = event.type === "PermissionRequest";
-  const transformed = transform(event);
+  const transformed = transformEvent(event);
 
   return new Promise((resolve) => {
     const socket = net.connect(endpoint());

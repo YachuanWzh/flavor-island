@@ -23,3 +23,11 @@ test('non-string input is returned as-is', () => {
   assert.equal(normalize(undefined), undefined);
   assert.equal(normalize(42), 42);
 });
+
+test('model/plan/compact snake_case aliases normalize', () => {
+  assert.equal(normalize('before_model_call'), 'BeforeModelCall');
+  assert.equal(normalize('after_model_call'), 'AfterModelCall');
+  assert.equal(normalize('before_plan'), 'BeforePlan');
+  assert.equal(normalize('after_plan'), 'AfterPlan');
+  assert.equal(normalize('post_compact'), 'PostCompact');
+});

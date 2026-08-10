@@ -21,7 +21,12 @@
       { "name": "PostToolUseFailure" },
       { "name": "PermissionRequest" },
       { "name": "PreCompact" },
-      { "name": "Notification" }
+      { "name": "Notification" },
+      { "name": "BeforeModelCall" },
+      { "name": "AfterModelCall" },
+      { "name": "BeforePlan" },
+      { "name": "AfterPlan" },
+      { "name": "PostCompact" }
     ]
   }
 }

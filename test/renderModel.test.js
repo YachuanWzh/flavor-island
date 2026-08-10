@@ -57,3 +57,87 @@ test('model and agent metadata surface in rows', () => {
   });
   assert.equal(m.rows[0].source, 'flavor-code');
 });
+
+test('planning status: label, key, and mascot state', () => {
+  // Status.planning may not be landed yet by the parallel sessionStore change,
+  // so fall back to the documented literal value of the contract.
+  const m = renderModel({
+    sessions: { s1: session(Status.planning ?? 'planning', { cwd: 'C:\\proj' }) },
+  });
+  assert.equal(m.rows[0].statusKey, 'planning');
+  assert.equal(m.rows[0].statusLabel, 'Planning…');
+  assert.equal(m.mascotState, 'processing');
+});
+
+test('planning sorts at the processing tier (below running, above idle)', () => {
+  const m = renderModel({
+    sessions: {
+      idle: session(Status.idle),
+      run: session(Status.running),
+      plan: session(Status.planning ?? 'planning'),
+    },
+  });
+  assert.deepEqual(m.rows.map((r) => r.id), ['run', 'plan', 'idle']);
+});
+
+test('row passes through detail fields from the session', () => {
+  const startTime = 1712345678901;
+  const m = renderModel({
+    sessions: {
+      s1: session(Status.processing, {
+        model: 'deepseek:deepseek-v4-flash',
+        failureCount: 3,
+        interrupted: true,
+        lastUserPrompt: 'fix the bug',
+        lastToolOutput: 'npm test ok',
+        lastToolError: 'Edit failed: no match',
+        lastModelError: 'rate limit exceeded',
+        startTime,
+      }),
+    },
+  });
+  const row = m.rows[0];
+  assert.equal(row.model, 'deepseek:deepseek-v4-flash');
+  assert.equal(row.failureCount, 3);
+  assert.equal(row.interrupted, true);
+  assert.equal(row.lastUserPrompt, 'fix the bug');
+  assert.equal(row.lastToolOutput, 'npm test ok');
+  assert.equal(row.lastToolError, 'Edit failed: no match');
+  assert.equal(row.lastModelError, 'rate limit exceeded');
+  assert.equal(row.startTime, startTime);
+});
+
+test('missing detail fields default to null/zero values', () => {
+  const m = renderModel({
+    sessions: { s1: session(Status.idle, { startTime: undefined }) },
+  });
+  const row = m.rows[0];
+  assert.equal(row.model, null);
+  assert.equal(row.failureCount, 0);
+  assert.equal(row.interrupted, false);
+  assert.equal(row.lastUserPrompt, null);
+  assert.equal(row.lastToolOutput, null);
+  assert.equal(row.lastToolError, null);
+  assert.equal(row.lastModelError, null);
+  assert.equal(row.startTime, 0);
+});
+
+test('history is limited to the most recent 10 entries', () => {
+  const history = Array.from({ length: 15 }, (_, i) => ({
+    tool: `Tool${i}`,
+    description: `desc${i}`,
+    success: i % 2 === 0,
+    timestamp: 1000 + i,
+  }));
+  const m = renderModel({ sessions: { s1: session(Status.idle, { history }) } });
+  const row = m.rows[0];
+  assert.equal(row.history.length, 10);
+  assert.equal(row.history[0].tool, 'Tool5');
+  assert.equal(row.history[9].tool, 'Tool14');
+  assert.deepEqual(row.history[9], history[14]);
+});
+
+test('history is an empty array when the session has none', () => {
+  const m = renderModel({ sessions: { s1: session(Status.idle) } });
+  assert.deepEqual(m.rows[0].history, []);
+});

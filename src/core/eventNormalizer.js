@@ -42,6 +42,10 @@ const ALIASES = {
   subagent_stop: 'SubagentStop',
   pre_compact: 'PreCompact',
   post_compact: 'PostCompact',
+  before_model_call: 'BeforeModelCall',
+  after_model_call: 'AfterModelCall',
+  before_plan: 'BeforePlan',
+  after_plan: 'AfterPlan',
   notification: 'Notification',
 };
 

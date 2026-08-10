@@ -7,6 +7,9 @@ const STATUS_PRIORITY = {
   waitingApproval: 5,
   waitingQuestion: 4,
   running: 3,
+  // Planning is a distinct, quieter phase than tool execution: same visual
+  // tier as processing (2) so it sorts below running but above idle.
+  planning: 2,
   processing: 2,
   idle: 0,
 };
@@ -25,6 +28,8 @@ function statusLabel(session) {
       return 'Question';
     case 'running':
       return session.currentTool ? `Running · ${session.currentTool}` : 'Running';
+    case 'planning':
+      return 'Planning…';
     case 'processing':
       return 'Thinking…';
     case 'idle':
@@ -40,6 +45,9 @@ function mascotStateFor(status) {
       return 'waiting';
     case 'running':
       return 'running';
+    case 'planning':
+      // Planning reads like quiet thinking on the pill, not full tool activity.
+      return 'processing';
     case 'processing':
       return 'processing';
     default:
@@ -88,6 +96,19 @@ function renderModel(state = {}) {
       pending: session.status === 'waitingApproval' || session.status === 'waitingQuestion',
       lastActivity: session.lastActivity || 0,
       lastAssistantMessage: session.lastAssistantMessage || null,
+      // Detail fields for the expandable row view; all null-safe so sessions
+      // that predate these fields (or lack them entirely) render cleanly.
+      model: session.model || null,
+      failureCount: session.failureCount || 0,
+      interrupted: session.interrupted || false,
+      lastUserPrompt: session.lastUserPrompt || null,
+      lastToolOutput: session.lastToolOutput || null,
+      lastToolError: session.lastToolError || null,
+      lastModelError: session.lastModelError || null,
+      startTime: session.startTime || 0,
+      // Compact timeline: newest first, capped at 10 entries so a long session
+      // doesn't blow up the detail panel.
+      history: (session.history || []).slice(-10),
     }))
     .sort((a, b) => {
       const pa = STATUS_PRIORITY[a.statusKey] ?? 1;
