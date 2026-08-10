@@ -56,6 +56,66 @@ test('allowAll decision passes through', async () => {
   assert.equal(await decision, 'allowAll');
 });
 
+test('allowAll auto-approves later same-tool calls without a card', async () => {
+  const state = createAppState();
+  const first = state.requestPermission(evt('PermissionRequest', {
+    toolName: 'Bash', toolInput: { command: 'npm test' },
+  }));
+  state.resolvePermission(state.listPending()[0].key, 'allowAll');
+  assert.equal(await first, 'allowAll');
+
+  // A different same-tool call arrives later: no card, immediate allow.
+  const second = state.requestPermission(evt('PermissionRequest', {
+    toolName: 'Bash', toolInput: { command: 'git status' },
+  }));
+  assert.equal(state.listPending().length, 0);
+  assert.equal(await second, 'allow');
+});
+
+test('allowAll rule is scoped to the tool and the session', async () => {
+  const state = createAppState();
+  const first = state.requestPermission(evt('PermissionRequest', {
+    toolName: 'Bash', toolInput: { command: 'npm test' },
+  }));
+  state.resolvePermission(state.listPending()[0].key, 'allowAll');
+  await first;
+
+  // Another tool still prompts.
+  const other = state.requestPermission(evt('PermissionRequest', {
+    toolName: 'Edit', toolInput: { path: 'a.txt' },
+  }));
+  assert.equal(state.listPending().length, 1);
+  state.resolvePermission(state.listPending()[0].key, 'deny');
+  assert.equal(await other, 'deny');
+
+  // Another session still prompts for the same tool.
+  const foreign = state.requestPermission(evt('PermissionRequest', {
+    sessionId: 's2', toolName: 'Bash', toolInput: { command: 'npm test' },
+  }));
+  assert.equal(state.listPending().length, 1);
+  state.resolvePermission(state.listPending()[0].key, 'allow');
+  assert.equal(await foreign, 'allow');
+});
+
+test('SessionEnd clears the allowAll rule for that session', async () => {
+  const state = createAppState();
+  const first = state.requestPermission(evt('PermissionRequest', {
+    toolName: 'Bash', toolInput: { command: 'npm test' },
+  }));
+  state.resolvePermission(state.listPending()[0].key, 'allowAll');
+  await first;
+
+  state.handleEvent(evt('SessionEnd'));
+
+  // Same session id restarts: the rule is gone, the card returns.
+  const again = state.requestPermission(evt('PermissionRequest', {
+    toolName: 'Bash', toolInput: { command: 'npm test' },
+  }));
+  assert.equal(state.listPending().length, 1);
+  state.resolvePermission(state.listPending()[0].key, 'allow');
+  assert.equal(await again, 'allow');
+});
+
 test('requestAskUserQuestion resolves with allow+answers', async () => {
   const state = createAppState();
   const ev = evt('PermissionRequest', {

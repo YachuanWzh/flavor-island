@@ -18,6 +18,11 @@ function createAppState() {
   // primary request's outcome instead of spawning a second card.
   const recentDecisions = new Map();
   const RECENT_DECISION_TTL_MS = 30_000;
+  // sessionId -> Set of tool names the user "Allow all"-ed this session.
+  // flavor-code only records the rule in its own process, and every later
+  // call is still relayed here — so the island keeps its own copy and
+  // auto-approves matching calls instead of showing a card each time.
+  const allowAllRules = new Map();
   let seq = 0;
 
   function notify(effects = []) {
@@ -31,6 +36,12 @@ function createAppState() {
       if (e.type === 'removeSession') {
         denyPendingForSession(e.sessionId);
         delete sessions[e.sessionId];
+        allowAllRules.delete(e.sessionId);
+        // Session-scoped state dies with the session: drop replay cache
+        // entries that belong to it (dedupe keys are prefixed by session id).
+        for (const [key, entry] of recentDecisions) {
+          if (key.startsWith(`${e.sessionId}\u0001`) || key === e.sessionId) recentDecisions.delete(key);
+        }
       }
     }
     pruneRecentDecisions();
@@ -93,6 +104,12 @@ function createAppState() {
   function requestPermission(event) {
     const sessionId = event.sessionId || 'default';
     ensureSession(sessionId);
+
+    // "Allow all" already granted for this tool in this session -> approve
+    // silently without surfacing a card.
+    if (allowAllRules.get(sessionId)?.has(event.toolName || '')) {
+      return Promise.resolve('allow');
+    }
 
     const dedupeKey = permissionDedupeKey(event);
     // Duplicate while the primary is still waiting -> share its promise so
@@ -228,10 +245,15 @@ function createAppState() {
       s.toolDescription = null;
     }
     // Pass the decision through verbatim: 'deny', 'allow', or 'allowAll' (allow
-    // this call and persist a same-tool session rule). The hook server turns it
-    // into the right PermissionRequest response. Anything unexpected falls back
-    // to a plain allow.
+    // this call and record a same-tool session rule so later calls of that
+    // tool auto-approve). The hook server turns it into the right
+    // PermissionRequest response. Anything unexpected falls back to a plain
+    // allow.
     const decision = behavior === 'deny' || behavior === 'allowAll' ? behavior : 'allow';
+    if (decision === 'allowAll' && entry.event.toolName) {
+      if (!allowAllRules.has(entry.sessionId)) allowAllRules.set(entry.sessionId, new Set());
+      allowAllRules.get(entry.sessionId).add(entry.event.toolName);
+    }
     if (entry.kind === 'permission' && entry.dedupeKey) {
       recentDecisions.set(entry.dedupeKey, { decision, at: Date.now() });
     }

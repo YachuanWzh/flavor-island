@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-0.1.0-6f42c1" />
+  <img alt="version" src="https://img.shields.io/badge/version-0.2.0-6f42c1" />
   <img alt="license" src="https://img.shields.io/badge/license-MIT-brightgreen" />
   <img alt="platform" src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS-0078d4" />
   <img alt="electron" src="https://img.shields.io/badge/Electron-42.7.0-47848f" />
