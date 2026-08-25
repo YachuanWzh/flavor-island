@@ -117,6 +117,40 @@ test('daemon maps allow-all updatedPermissions to additionalContext', async () =
   }
 });
 
+test('daemon carries AskUserQuestion answers back in updatedInput', async () => {
+  const reply = JSON.stringify({
+    hookSpecificOutput: {
+      hookEventName: 'PermissionRequest',
+      decision: {
+        behavior: 'allow',
+        updatedInput: { answers: { 'Continue?': 'Yes' } },
+      },
+    },
+  });
+  const island = await fakeIsland(reply);
+  try {
+    const child = startDaemon(island.pipe);
+    const getOut = collectOutput(child);
+    child.stdin.end(requestLine(7, {
+      type: 'PermissionRequest',
+      payload: { tool: 'AskUserQuestion', agent: 'main', input: { questions: [{ header: 'H', question: 'Continue?', options: [{ label: 'Yes', description: 'Go' }] }] } },
+    }, true));
+    await new Promise((r) => child.on('close', r));
+    const parsed = JSON.parse(getOut());
+    assert.equal(parsed.ok, true);
+    assert.deepEqual(parsed.decision, {
+      decision: 'allow',
+      updatedInput: {
+        tool: 'AskUserQuestion',
+        input: { answers: { 'Continue?': 'Yes' } },
+        agent: 'main',
+      },
+    });
+  } finally {
+    await island.close();
+  }
+});
+
 test('daemon returns an ask decision when the island pipe is unreachable', async () => {
   const child = startDaemon(makePipe()); // nothing listening
   const getOut = collectOutput(child);

@@ -66,7 +66,14 @@ function writeResponse(id, payload) {
 function handleRequest(request) {
   const { id, event, wait } = request;
   const blocking = wait === true;
-  const transformed = transformEvent(event);
+  // A malformed event must not take down the whole daemon (which would fail
+  // every other pending request); fall back to forwarding the raw event.
+  let transformed;
+  try {
+    transformed = transformEvent(event);
+  } catch {
+    transformed = event;
+  }
   return new Promise((resolve) => {
     const socket = net.connect(endpoint());
     let response = "";
@@ -131,7 +138,11 @@ process.stdin.on("data", (chunk) => {
   }
 });
 process.stdin.on("end", () => {
-  // Drain in-flight requests, then exit.
+  // Drain in-flight requests, then exit. A hung island connection must not
+  // keep the daemon alive forever after the host has closed the pipe, so a
+  // 5s force-exit is the backstop.
+  const force = setTimeout(() => process.exit(0), 5000);
+  if (force.unref) force.unref();
   Promise.allSettled([...active]).then(() => process.exit(0));
 });
 process.stdin.on("error", () => process.exit(0));

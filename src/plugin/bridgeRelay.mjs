@@ -11,9 +11,14 @@ import { encodeRequest, decodeResponse, nextId } from "./bridgeProtocol.mjs";
 
 const ABORT_REASON = "Cancelled";
 const UNAVAILABLE_REASON = "Flavor Island unavailable";
+const TIMEOUT_REASON = "Flavor Island timed out";
+// Slightly below flavor-code's default PermissionRequest hook timeout (24h) so
+// the relay settles first with ask and the host's timeout abort is a no-op.
+const DEFAULT_BLOCKING_TIMEOUT_MS = 86_400_000 - 5_000;
 
 export function createBridgeRelay(deps) {
   const { spawn, execPath, bridgePath } = deps;
+  const blockingTimeoutMs = deps.blockingTimeoutMs ?? DEFAULT_BLOCKING_TIMEOUT_MS;
   let child = null;
   let stdoutBuffer = "";
   const pending = new Map();
@@ -46,15 +51,22 @@ export function createBridgeRelay(deps) {
         else entry.resolve({ decision: "ask", reason: decoded.reason });
       }
     });
-    c.on("close", () => {
-      // Daemon died (crash or disposal): fail every blocked request with ask,
-      // then forget the child so the next relay re-spawns.
+    const onDaemonGone = (reason) => {
+      // Daemon died (crash, spawn failure, or disposal): fail every blocked
+      // request with ask, then forget the child so the next relay re-spawns.
+      // Guarded so 'error' + 'close' firing together only settles once.
+      if (child !== c) return;
       child = null;
       for (const [id, entry] of pending) {
         pending.delete(id);
-        entry.resolve({ decision: "ask", reason: UNAVAILABLE_REASON });
+        if (entry.timer) clearTimeout(entry.timer);
+        entry.resolve({ decision: "ask", reason });
       }
-    });
+    };
+    // Without this listener, a failed spawn (EMFILE, permission denial, …)
+    // surfaces as an uncaught 'error' on the child and crashes flavor-code.
+    c.on("error", () => onDaemonGone(UNAVAILABLE_REASON));
+    c.on("close", () => onDaemonGone(UNAVAILABLE_REASON));
     child = c;
     return c;
   }
@@ -67,11 +79,14 @@ export function createBridgeRelay(deps) {
       return new Promise((resolve) => {
         const onAbort = () => {
           pending.delete(id);
+          if (entry.timer) clearTimeout(entry.timer);
           resolve({ decision: "deny", reason: ABORT_REASON });
         };
         const entry = {
+          timer: null,
           resolve: (value) => {
             signal?.removeEventListener("abort", onAbort);
+            if (entry.timer) clearTimeout(entry.timer);
             resolve(value);
           },
         };
@@ -80,12 +95,21 @@ export function createBridgeRelay(deps) {
           return;
         }
         signal?.addEventListener("abort", onAbort, { once: true });
+        // Own timeout: the host's hook timeout would abort the signal and
+        // settle as deny; the spec wants a hung island to fall back to ask so
+        // the user still gets a terminal prompt. Settle ask first instead.
+        entry.timer = setTimeout(() => {
+          pending.delete(id);
+          signal?.removeEventListener("abort", onAbort);
+          resolve({ decision: "ask", reason: TIMEOUT_REASON });
+        }, blockingTimeoutMs);
         pending.set(id, entry);
         try {
           c.stdin.write(encodeRequest(id, event, true));
         } catch {
           pending.delete(id);
           signal?.removeEventListener("abort", onAbort);
+          clearTimeout(entry.timer);
           resolve({ decision: "ask", reason: UNAVAILABLE_REASON });
         }
       });

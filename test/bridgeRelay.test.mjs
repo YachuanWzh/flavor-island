@@ -134,3 +134,42 @@ test('blocking request with unreachable daemon write failure resolves ask', asyn
   assert.equal(decision.decision, 'ask');
   assert.equal(relay.pendingCount(), 0);
 });
+
+test('spawn error (EMFILE/denied) settles blocking requests as ask without crashing', async () => {
+  const deps = {
+    execPath: 'node',
+    bridgePath: '/x/bridgeDaemon.mjs',
+    spawn: () => {
+      const c = fakeChild();
+      // Simulate spawn failure: error fires, close never does.
+      process.nextTick(() => c.emit('error', new Error('EMFILE: too many open files')));
+      return c;
+    },
+  };
+  const relay = createBridgeRelay(deps);
+  const decision = await relay.relay(PERM, new AbortController().signal);
+  assert.deepEqual(decision, { decision: 'ask', reason: 'Flavor Island unavailable' });
+  assert.equal(relay.pendingCount(), 0);
+});
+
+test('blocking request times out as ask, not deny', async () => {
+  const { relay, calls } = makeRelay(); // default blocking timeout is long
+  // Recreate with a tiny timeout to exercise the timer path.
+  const shortDeps = {
+    execPath: 'node',
+    bridgePath: '/x/bridgeDaemon.mjs',
+    blockingTimeoutMs: 20,
+    spawn: () => {
+      const c = fakeChild();
+      calls.push({ child: c });
+      return c;
+    },
+  };
+  const shortRelay = createBridgeRelay(shortDeps);
+  const controller = new AbortController();
+  const promise = shortRelay.relay(PERM, controller.signal);
+  const decision = await promise;
+  assert.equal(decision.decision, 'ask');
+  assert.equal(shortRelay.pendingCount(), 0);
+  assert.equal(relay.pendingCount(), 0);
+});
