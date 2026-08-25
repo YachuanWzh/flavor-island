@@ -6,3 +6,7 @@ dist/
 .DS_Store
 .flavor/superharness/
 .flavor
+# superharness brainstorm mind-map session state (transient)
+.superharness/
+# superharness ralph runtime state (per-task tracking + retry)
+.flavor/superharness/ralph/
