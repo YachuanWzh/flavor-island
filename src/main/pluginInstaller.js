@@ -14,9 +14,22 @@ const path = require('node:path');
 // (see flavor-code src/production.ts). The global tier is the right home for
 // a companion app: one install covers all workspaces.
 
-// NOTE: bridge.mjs imports eventTransform.mjs via a relative path, so it must
-// ship alongside — omitting it makes the plugin fail to load in flavor-code.
-const PLUGIN_FILES = ['flavor-plugin.json', 'activate.mjs', 'bridge.mjs', 'eventTransform.mjs'];
+// bridgeDaemon.mjs imports eventTransform.mjs and bridgeProtocol.mjs via
+// relative paths, and bridgeRelay.mjs is imported by activate.mjs, so all of
+// them must ship together — omitting any one makes the plugin fail to load in
+// flavor-code.
+const PLUGIN_FILES = [
+  'flavor-plugin.json',
+  'activate.mjs',
+  'bridgeDaemon.mjs',
+  'bridgeRelay.mjs',
+  'bridgeProtocol.mjs',
+  'eventTransform.mjs',
+];
+
+// Legacy files older island versions installed but no longer used. Removed so
+// a stale one-shot relay can't linger in flavor-code's plugin dir.
+const STALE_FILES = ['bridge.mjs'];
 
 function pluginInstallDir(home = os.homedir()) {
   return path.join(home, '.flavor-code', 'plugins', 'flavor-island');
@@ -28,8 +41,9 @@ function pluginSourceDir() {
 
 // Copy each plugin file into the target directory, writing only when content
 // actually differs (a flavor-code session may be reading the plugin right now;
-// unchanged files are left untouched). Returns the install directory, or
-// throws with the underlying error when installation fails.
+// unchanged files are left untouched). Stale files are pruned afterwards.
+// Returns the install directory, or throws with the underlying error when
+// installation fails.
 function installPlugin(home = os.homedir()) {
   const destDir = pluginInstallDir(home);
   const srcDir = pluginSourceDir();
@@ -44,7 +58,11 @@ function installPlugin(home = os.homedir()) {
       fs.writeFileSync(dest, content);
     }
   }
+  for (const name of STALE_FILES) {
+    const stale = path.join(destDir, name);
+    try { fs.unlinkSync(stale); } catch { /* already gone */ }
+  }
   return destDir;
 }
 
-module.exports = { installPlugin, pluginInstallDir, PLUGIN_FILES };
+module.exports = { installPlugin, pluginInstallDir, PLUGIN_FILES, STALE_FILES };
