@@ -1,6 +1,6 @@
 {
   "name": "flavor-island",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "author": "YachuanWzh",
   "description": "Real-time AI coding agent status island for Windows & macOS, native to flavor-code. A flavor-code-flavored port of CodeIsland / CodeIslandWin.",
   "main": "src/main/main.js",
