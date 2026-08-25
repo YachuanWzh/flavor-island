@@ -1,6 +1,7 @@
 node_modules/
 release/
 dist/
+.worktrees/
 *.log
 .DS_Store
 .flavor/superharness/
