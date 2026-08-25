@@ -31,11 +31,13 @@ function createAppState(options = {}) {
   const subscribers = new Set();
   // key -> { resolve, event, sessionId, kind }
   const pending = new Map();
-  // dedupeKey -> { promise, decision, at }. Two plugin tiers can both relay
-  // the same hook event (the baked-in `codeisland` plugin from `flavor init`
-  // plus the global `flavor-island` plugin), so one user action may arrive
-  // twice — in flight or back-to-back. This cache makes duplicates share the
-  // primary request's outcome instead of spawning a second card.
+  // dedupeKey -> { promise, decision, at }. The global `flavor-island` plugin
+  // is the only relay today (the baked-in `codeisland` plugin was removed from
+  // flavor-code), but a user can still end up with a stale copy in their
+  // ~/.flavor-code/plugins dir — or run the island while an old flavor-code
+  // session is alive — so one user action can still arrive twice, in flight
+  // or back-to-back. This cache makes duplicates share the primary request's
+  // outcome instead of spawning a second card.
   const recentDecisions = new Map();
   const RECENT_DECISION_TTL_MS = 30_000;
   // sessionId -> Set of tool names the user "Allow all"-ed this session.
