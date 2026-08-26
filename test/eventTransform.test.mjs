@@ -189,3 +189,37 @@ test('notification question maps its prompt and choices', () => {
   assert.equal(out.question, 'Continue?');
   assert.deepEqual(out.question_options, options);
 });
+
+test('privacy boundary redacts secrets and drops bulky input fields before transport', () => {
+  const out = transformEvent(evt('PreToolUse', {
+    tool: 'Bash',
+    input: {
+      command: 'curl -H "Authorization: Bearer abc.def.secret" https://x.test?token=hidden',
+      content: 'private file contents'.repeat(1000),
+    },
+  }));
+  assert.match(out.command, /Bearer \[REDACTED\]/);
+  assert.match(out.command, /token=\[REDACTED\]/);
+  assert.ok(!('content' in out.tool_input));
+});
+
+test('usage, summary, deliverables, and local control metadata cross the bridge', () => {
+  const out = transformEvent(evt('Stop', {
+    islandControlEndpoint: '\\\\.\\pipe\\control',
+    islandControlToken: 'random-token',
+    islandControlCapabilities: ['abort', 'focus'],
+    durationMs: 1234,
+    inputTokens: 100,
+    outputTokens: 25,
+    cacheReadTokens: 50,
+    cacheCreationTokens: 10,
+    summary: 'Finished',
+    deliverables: [{ path: 'src/a.ts', operation: 'update', added: 2, removed: 1 }],
+  }));
+  assert.equal(out.island_control_token, 'random-token');
+  assert.deepEqual(out.island_control_capabilities, ['abort', 'focus']);
+  assert.equal(out.model_duration_ms, 1234);
+  assert.equal(out.input_tokens, 100);
+  assert.equal(out.summary, 'Finished');
+  assert.deepEqual(out.deliverables, [{ path: 'src/a.ts', operation: 'update', added: 2, removed: 1 }]);
+});

@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self'; style-src 'self'; script-src 'self'" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="settings.css" />
+  <title>Flavor Island 设置</title>
+</head>
+<body>
+  <main class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-icon"><img src="../assets/flavor.png" alt="" /></div>
+        <div><strong>Flavor Island</strong><span>偏好设置</span></div>
+      </div>
+
+      <nav aria-label="设置分类">
+        <button class="nav-item active" type="button" data-target="behavior">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h7m4 0h5M4 17h3m4 0h9M11 4v6m-4 4v6"/><circle cx="11" cy="7" r="2"/><circle cx="7" cy="17" r="2"/></svg>
+          <span>外观与行为</span>
+        </button>
+        <button class="nav-item" type="button" data-target="privacy">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.8 2.7 8 7 10 4.3-2 7-5.2 7-10V6l-7-3Z"/><path d="m9.2 12 1.8 1.8 3.8-4"/></svg>
+          <span>隐私</span>
+        </button>
+        <button class="nav-item" type="button" data-target="usage">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19V11m7 8V5m7 14v-6"/><path d="M3 19h18"/></svg>
+          <span>用量与费用</span>
+        </button>
+      </nav>
+
+      <div class="connection-card">
+        <div class="connection-head"><i id="live-dot"></i><strong id="live-label">正在连接</strong></div>
+        <dl>
+          <div><dt>服务</dt><dd id="server-status">—</dd></div>
+          <div><dt>插件</dt><dd id="plugin-status">—</dd></div>
+          <div><dt>会话</dt><dd id="session-count">0</dd></div>
+        </dl>
+      </div>
+    </aside>
+
+    <section class="workspace">
+      <header class="page-head">
+        <div>
+          <p class="overline">FLAVOR ISLAND</p>
+          <h1>设置</h1>
+          <p>调整灵动岛的提醒方式、隐私显示和费用估算。</p>
+        </div>
+        <span class="save-pill"><i></i><span id="save-state">设置会自动保存</span></span>
+      </header>
+
+      <div class="settings-scroll" id="settings-scroll">
+        <section class="settings-section" id="behavior">
+          <div class="section-heading"><div><h2>外观与行为</h2><p>控制灵动岛何时出现，以及如何提醒你。</p></div></div>
+          <div class="settings-card">
+            <label class="setting-row">
+              <span class="setting-copy"><strong>声音提醒</strong><small>仅在需要批准或回答问题时播放声音</small></span>
+              <span class="switch"><input id="sounds" type="checkbox" /><i></i></span>
+            </label>
+            <label class="setting-row">
+              <span class="setting-copy"><strong>自动展开</strong><small>有审批、问题或任务进度时展开面板</small></span>
+              <span class="switch"><input id="auto-expand" type="checkbox" /><i></i></span>
+            </label>
+            <label class="setting-row">
+              <span class="setting-copy"><strong>开机启动</strong><small>登录 Windows 后自动启动 Flavor Island</small></span>
+              <span class="switch"><input id="launch-at-login" type="checkbox" /><i></i></span>
+            </label>
+            <label class="setting-row">
+              <span class="setting-copy"><strong>动态效果</strong><small>调整辣椒动画和界面过渡</small></span>
+              <select id="motion"><option value="system">跟随系统</option><option value="full">完整动态</option><option value="reduced">减少动态</option></select>
+            </label>
+          </div>
+        </section>
+
+        <section class="settings-section" id="privacy">
+          <div class="section-heading"><div><h2>隐私</h2><p>决定灵动岛可以展示多少任务内容。</p></div><span class="recommended">推荐开启</span></div>
+          <div class="settings-card privacy-card">
+            <label class="setting-row privacy-row">
+              <span class="privacy-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="10" width="10" height="8" rx="2"/><path d="M9 10V8a3 3 0 0 1 6 0v2"/></svg></span>
+              <span class="setting-copy"><strong>隐私模式</strong><small>隐藏提示词、命令、工具输出和验证详情；审批时仍显示做决定所需的内容</small></span>
+              <span class="switch"><input id="privacy-mode" type="checkbox" /><i></i></span>
+            </label>
+            <div class="local-note"><i>✓</i><span><strong>内容保存在本机</strong><small>设置、价格和会话控制凭据不会发送到外部服务。</small></span></div>
+          </div>
+        </section>
+
+        <section class="settings-section" id="usage">
+          <div class="section-heading"><div><h2>用量与费用</h2><p>填入模型价格后，灵动岛会估算每轮任务费用。</p></div></div>
+          <div class="settings-card pricing-card">
+            <div class="price-head"><span>每百万 token / 美元</span><small>留空或填 0 时只显示 token 与耗时</small></div>
+            <div class="price-grid">
+              <label><span>输入</span><div><b>$</b><input id="price-input" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00" /></div></label>
+              <label><span>输出</span><div><b>$</b><input id="price-output" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00" /></div></label>
+              <label><span>缓存读取</span><div><b>$</b><input id="price-cache-read" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00" /></div></label>
+              <label><span>缓存写入</span><div><b>$</b><input id="price-cache-create" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00" /></div></label>
+            </div>
+          </div>
+        </section>
+
+        <footer><span>Flavor Island · 本机设置</span><button id="reset" type="button">恢复默认设置</button></footer>
+      </div>
+    </section>
+  </main>
+  <script src="settings.js"></script>
+</body>
+</html>

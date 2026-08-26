@@ -2,12 +2,15 @@
 
 const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, screen } = require('electron');
 const path = require('node:path');
+const fs = require('node:fs');
 const { createAppState } = require('./appState');
 const { createHookServer } = require('../server/hookServer');
 const { renderModel } = require('../core/renderModel');
 const { computeWindowBounds } = require('../core/windowLayout');
 const { pipePath } = require('../core/pipePath');
 const { installPlugin } = require('./pluginInstaller');
+const { normalizeSettings, DEFAULT_SETTINGS } = require('../core/settings');
+const { sendControlCommand } = require('./controlClient');
 
 const IS_WIN = process.platform === 'win32';
 
@@ -53,7 +56,11 @@ const TOP_MARGIN = 6;
 
 let win = null;
 let tray = null;
+let settingsWin = null;
 let server = null;
+let settings = normalizeSettings(DEFAULT_SETTINGS);
+let serverStatus = 'starting';
+let quitting = false;
 // Renderer is not ready to receive state until its page finishes loading.
 // Pushing earlier races the load and Electron logs "Render frame was disposed".
 let rendererReady = false;
@@ -68,8 +75,10 @@ let userPosition = null;
 let lastSetBounds = null;
 
 function positionWindow(height) {
-  if (!win) return;
-  const display = screen.getPrimaryDisplay();
+  if (!win || win.isDestroyed()) return;
+  const current = win.getBounds();
+  const point = userPosition || { x: current.x + Math.round(current.width / 2), y: current.y + Math.round(current.height / 2) };
+  const display = screen.getDisplayNearestPoint(point);
   // Never let the island grow past the bottom of the screen — clamp to the work
   // area and let the panel scroll internally for content that doesn't fit.
   const bounds = computeWindowBounds(height, {
@@ -88,7 +97,7 @@ function positionWindow(height) {
 }
 
 function createWindow() {
-  win = new BrowserWindow({
+  const islandWindow = new BrowserWindow({
     width: WIN_WIDTH,
     height: 56,
     frame: false,
@@ -107,29 +116,42 @@ function createWindow() {
       nodeIntegration: false,
     },
   });
-  win.setAlwaysOnTop(true, 'screen-saver');
-  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  win = islandWindow;
+  islandWindow.setAlwaysOnTop(true, 'screen-saver');
+  islandWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   // A transparent window still swallows clicks on every pixel, so the fixed-width
   // island would block the mostly-empty area around the pill. Start fully
   // click-through; the renderer re-arms us (set-ignore-mouse) only while the
   // cursor is over visible content. forward:true keeps move events flowing so the
   // renderer can detect re-entry.
-  win.setIgnoreMouseEvents(true, { forward: true });
-  win.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
+  islandWindow.setIgnoreMouseEvents(true, { forward: true });
+  islandWindow.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
 
-  win.webContents.on('did-finish-load', () => {
+  islandWindow.webContents.on('did-finish-load', () => {
+    if (win !== islandWindow) return;
     rendererReady = true;
     // Render whatever state accumulated while the page was loading.
     pushState();
   });
-  win.webContents.on('render-process-gone', () => { rendererReady = false; });
+  islandWindow.webContents.on('render-process-gone', () => {
+    if (win !== islandWindow) return;
+    rendererReady = false;
+    appState.fallbackPending('Flavor Island renderer restarted');
+    if (!quitting) {
+      setTimeout(() => {
+        if (quitting || win !== islandWindow) return;
+        try { islandWindow.destroy(); } catch { /* already gone */ }
+        createWindow();
+      }, 350);
+    }
+  });
 
   // Remember where the user drags the island to. A move whose final position
   // matches the bounds we set programmatically is our own resize, not a drag —
   // ignore those so a content-driven resize can't masquerade as a user move.
-  win.on('moved', () => {
-    if (!win || win.isDestroyed()) return;
-    const { x, y } = win.getBounds();
+  islandWindow.on('moved', () => {
+    if (win !== islandWindow || islandWindow.isDestroyed()) return;
+    const { x, y } = islandWindow.getBounds();
     if (lastSetBounds && x === lastSetBounds.x && y === lastSetBounds.y) return;
     userPosition = { x, y };
   });
@@ -139,11 +161,14 @@ function createWindow() {
 
 function pushState(effects = []) {
   if (!win || win.isDestroyed() || win.webContents.isDestroyed() || !rendererReady) return;
-  const sounds = effects.filter((e) => e.type === 'playSound').map((e) => e.event);
+  const sounds = settings.sounds
+    ? effects.filter((e) => e.type === 'playSound').map((e) => e.event)
+    : [];
   win.webContents.send('state-update', {
-    model: renderModel(appState.snapshot()),
+    model: renderModel(appState.snapshot(), settings),
     pending: appState.listPending(),
     sounds,
+    settings,
   });
 }
 
@@ -168,9 +193,15 @@ async function startServerWithRetry(retryMs = 10_000) {
   for (;;) {
     try {
       await startServer();
+      serverStatus = 'connected';
+      buildTray();
+      pushSettingsStatus();
       return;
     } catch (err) {
       console.error(`hook server failed to start (${err.message}); retrying in ${retryMs}ms`);
+      serverStatus = 'retrying';
+      buildTray();
+      pushSettingsStatus();
       await new Promise((r) => setTimeout(r, retryMs));
     }
   }
@@ -178,14 +209,89 @@ async function startServerWithRetry(retryMs = 10_000) {
 
 function buildTray() {
   const icon = nativeImage.createFromPath(path.join(__dirname, '..', 'assets', 'flavor.png'));
-  tray = new Tray(icon.isEmpty() ? nativeImage.createEmpty() : icon.resize({ width: 16, height: 16 }));
+  if (!tray) tray = new Tray(icon.isEmpty() ? nativeImage.createEmpty() : icon.resize({ width: 16, height: 16 }));
   tray.setToolTip('Flavor Island');
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: 'Reset position', click: () => { if (win && !win.isDestroyed()) { userPosition = null; positionWindow(win.getBounds().height); } } },
-    { label: pluginStatus ? `Plugin: ${pluginStatus}` : 'Plugin: installing…', enabled: false },
+    { label: '设置…', click: openSettingsWindow },
+    { label: win && win.isVisible() ? '隐藏灵动岛' : '显示灵动岛', click: toggleIsland },
     { type: 'separator' },
-    { label: 'Quit', click: () => app.quit() },
+    { label: '声音提醒', type: 'checkbox', checked: settings.sounds, click: (item) => updateSettings({ sounds: item.checked }) },
+    { label: '开机启动', type: 'checkbox', checked: settings.launchAtLogin, click: (item) => updateSettings({ launchAtLogin: item.checked }) },
+    { label: '重置位置', click: () => { if (win && !win.isDestroyed()) { userPosition = null; positionWindow(win.getBounds().height); win.show(); } } },
+    { type: 'separator' },
+    { label: `连接: ${serverStatus}`, enabled: false },
+    { label: pluginStatus ? `插件: ${pluginStatus}` : '插件: installing…', enabled: false },
+    { type: 'separator' },
+    { label: '退出', click: () => app.quit() },
   ]));
+}
+
+function toggleIsland() {
+  if (!win || win.isDestroyed()) return;
+  if (win.isVisible()) win.hide(); else { win.show(); positionWindow(win.getBounds().height); }
+  buildTray();
+}
+
+function settingsPath() {
+  return path.join(app.getPath('userData'), 'settings.json');
+}
+
+function loadSettings() {
+  try { settings = normalizeSettings(JSON.parse(fs.readFileSync(settingsPath(), 'utf8'))); }
+  catch { settings = normalizeSettings(DEFAULT_SETTINGS); }
+}
+
+function persistSettings() {
+  const target = settingsPath();
+  const temp = `${target}.tmp`;
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.writeFileSync(temp, `${JSON.stringify(settings, null, 2)}\n`, { mode: 0o600 });
+  fs.renameSync(temp, target);
+}
+
+function pushSettingsStatus() {
+  if (!settingsWin || settingsWin.isDestroyed() || settingsWin.webContents.isDestroyed()) return;
+  settingsWin.webContents.send('settings-state', {
+    settings,
+    status: { server: serverStatus, plugin: pluginStatus || 'installing', sessions: Object.keys(appState.snapshot().sessions).length },
+  });
+}
+
+function updateSettings(patch) {
+  settings = normalizeSettings({ ...settings, ...patch, pricing: patch.pricing || settings.pricing });
+  try { persistSettings(); } catch (error) { console.error(`settings save failed: ${error.message}`); }
+  app.setLoginItemSettings({ openAtLogin: settings.launchAtLogin });
+  buildTray();
+  pushState();
+  pushSettingsStatus();
+  return settings;
+}
+
+function openSettingsWindow() {
+  if (settingsWin && !settingsWin.isDestroyed()) {
+    if (settingsWin.isMinimized()) settingsWin.restore();
+    settingsWin.show();
+    settingsWin.focus();
+    pushSettingsStatus();
+    return;
+  }
+  settingsWin = new BrowserWindow({
+    width: 840,
+    height: 720,
+    minWidth: 720,
+    minHeight: 600,
+    title: 'Flavor Island 设置',
+    backgroundColor: '#111219',
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'settings-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  settingsWin.loadFile(path.join(__dirname, '..', 'settings', 'index.html'));
+  settingsWin.webContents.on('did-finish-load', pushSettingsStatus);
+  settingsWin.on('closed', () => { settingsWin = null; });
 }
 
 // Install the flavor-code companion plugin (idempotent). It lives in
@@ -206,14 +312,27 @@ app.whenReady().then(async () => {
   // macOS accessory app: the island lives in the menu-bar layer, not the Dock.
   if (process.platform === 'darwin' && app.dock) app.dock.hide();
 
+  loadSettings();
+  app.setLoginItemSettings({ openAtLogin: settings.launchAtLogin });
   setupPlugin();
   createWindow();
   buildTray();
   // Fire-and-forget: keep retrying until the pipe binds (see startServerWithRetry).
   startServerWithRetry();
 
-  appState.subscribe((_, effects) => pushState(effects));
+  appState.subscribe((_, effects) => {
+    pushState(effects);
+    pushSettingsStatus();
+  });
   pushState();
+
+  const keepIslandVisible = () => {
+    if (!win || win.isDestroyed()) return;
+    positionWindow(win.getBounds().height);
+  };
+  screen.on('display-added', keepIslandVisible);
+  screen.on('display-removed', keepIslandVisible);
+  screen.on('display-metrics-changed', keepIslandVisible);
 
   setInterval(() => appState.cleanupIdle(), 30 * 1000);
 });
@@ -244,7 +363,29 @@ ipcMain.on('permission-decision', (_evt, { key, behavior }) => appState.resolveP
 ipcMain.on('question-answer', (_evt, { key, answer }) => appState.resolveQuestion(key, answer));
 ipcMain.on('ask-answer', (_evt, { key, answers, details }) => appState.resolveAskUserQuestion(key, answers, details));
 ipcMain.on('ask-skip', (_evt, { key }) => appState.skipAskUserQuestion(key));
+ipcMain.handle('settings-get', () => ({
+  settings,
+  status: { server: serverStatus, plugin: pluginStatus || 'installing', sessions: Object.keys(appState.snapshot().sessions).length },
+}));
+ipcMain.handle('settings-save', (_evt, value) => updateSettings(value || {}));
+ipcMain.handle('settings-reset', () => updateSettings(DEFAULT_SETTINGS));
+ipcMain.handle('settings-open', () => { openSettingsWindow(); return true; });
+ipcMain.handle('session-control', async (_evt, { sessionId, command, message } = {}) => {
+  const session = appState.snapshot().sessions[sessionId];
+  if (!session) throw new Error('Session is no longer available');
+  if (!session.controlCapabilities.includes(command)) throw new Error('This control is not supported by the session');
+  return sendControlCommand({
+    endpoint: session.controlEndpoint,
+    token: session.controlToken,
+    command,
+    message,
+  });
+});
 ipcMain.on('quit', () => app.quit());
 
 app.on('window-all-closed', () => { /* keep running in tray */ });
-app.on('before-quit', async () => { if (server) await server.stop(); });
+app.on('before-quit', async () => {
+  quitting = true;
+  appState.fallbackPending('Flavor Island is quitting');
+  if (server) await server.stop();
+});

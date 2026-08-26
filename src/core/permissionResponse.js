@@ -20,6 +20,9 @@ function alwaysAllowRule(toolName) {
 // 'allowAll'. 'allowAll' allows the current call and adds a session-scoped rule
 // so every later same-tool call is auto-approved without re-prompting.
 function permissionResponse(decision, event) {
+  if (decision === 'ask') {
+    return JSON.stringify({ islandDecision: 'ask', reason: 'Flavor Island could not present the request' });
+  }
   let dec;
   if (decision === 'deny') {
     dec = { behavior: 'deny' };

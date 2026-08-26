@@ -42,6 +42,7 @@ function createAppState(options = {}) {
   const RECENT_DECISION_TTL_MS = 30_000;
   // sessionId -> tool-display scheduler state (see the smoothing block above).
   const toolDisplay = new Map();
+  const lastSequences = new Map();
   let seq = 0;
 
   function notify(effects = []) {
@@ -61,6 +62,7 @@ function createAppState(options = {}) {
           if (key.startsWith(`${e.sessionId}\u0001`) || key === e.sessionId) recentDecisions.delete(key);
         }
         dropToolDisplay(e.sessionId);
+        lastSequences.delete(e.sessionId);
       }
     }
     pruneRecentDecisions();
@@ -88,7 +90,39 @@ function createAppState(options = {}) {
     return null;
   }
 
+  function fallbackValueFor(kind, reason) {
+    if (kind === 'permission') return 'ask';
+    return { islandDecision: 'ask', reason: reason || 'Flavor Island is unavailable' };
+  }
+
+  // Renderer crashes, reloads, and app shutdown must never strand flavor-code
+  // on an Island-owned promise. Hand the decision back to the host so its
+  // normal terminal/desktop interaction can take over.
+  function fallbackPending(reason) {
+    let changed = false;
+    for (const [key, entry] of pending) {
+      pending.delete(key);
+      entry.resolve(fallbackValueFor(entry.kind, reason));
+      changed = true;
+    }
+    for (const session of Object.values(sessions)) {
+      if (session.status === Status.waitingApproval || session.status === Status.waitingQuestion) {
+        session.status = Status.processing;
+        session.currentTool = null;
+        session.toolDescription = null;
+      }
+    }
+    if (changed) notify();
+    return changed;
+  }
+
   function handleEvent(event) {
+    const sessionId = event?.sessionId || 'default';
+    if (Number.isSafeInteger(event?.eventSequence)) {
+      const last = lastSequences.get(sessionId);
+      if (Number.isSafeInteger(last) && event.eventSequence <= last) return;
+      lastSequences.set(sessionId, event.eventSequence);
+    }
     const { effects } = reduceEvent(sessions, event);
     applyEffects(effects);
     // The reducer already cleared currentTool for a finished tool; the display
@@ -522,6 +556,7 @@ function createAppState(options = {}) {
     resolveQuestion,
     resolveAskUserQuestion,
     skipAskUserQuestion,
+    fallbackPending,
     listPending,
     cleanupIdle,
     subscribe(fn) { subscribers.add(fn); return () => subscribers.delete(fn); },

@@ -14,6 +14,7 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createBridgeRelay } from "./bridgeRelay.mjs";
+import { transformEvent } from "./eventTransform.mjs";
 
 const bridgePath = fileURLToPath(new URL("./bridgeDaemon.mjs", import.meta.url));
 const BLOCKING_TIMEOUT_MS = 86_400_000;
@@ -33,6 +34,7 @@ export function activate(context) {
     spawn,
     execPath: process.execPath,
     bridgePath,
+    transform: transformEvent,
   });
   const disposers = [];
   for (const eventName of names) {

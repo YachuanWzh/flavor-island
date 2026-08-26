@@ -25,7 +25,7 @@ test('computeWindowBounds keeps user position and re-clamps height', () => {
   });
   assert.equal(b.x, 100);
   assert.equal(b.y, 200);
-  assert.equal(b.height, 494); // clamped to 500 - 6
+  assert.equal(b.height, 300); // clamped to the space below the dragged y
 });
 
 test('computeWindowBounds leaves in-range height untouched', () => {

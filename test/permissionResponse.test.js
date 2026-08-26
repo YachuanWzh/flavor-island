@@ -30,3 +30,10 @@ test('allowAll for MCP tools uses bare tool name', () => {
   const rules = resp.hookSpecificOutput.decision.updatedPermissions[0].rules;
   assert.deepEqual(rules, [{ toolName: 'mcp__server__read' }]);
 });
+
+test('ask hands the decision back to flavor-code', () => {
+  assert.deepEqual(JSON.parse(permissionResponse('ask')), {
+    islandDecision: 'ask',
+    reason: 'Flavor Island could not present the request',
+  });
+});

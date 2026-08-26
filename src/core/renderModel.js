@@ -78,7 +78,7 @@ function titleFor(id, session) {
   return basename(session.cwd) || (typeof id === 'string' ? id.slice(0, 8) : 'session');
 }
 
-function taskProgress(snapshot) {
+function taskProgress(snapshot, privateMode = false) {
   if (!snapshot || typeof snapshot !== 'object') return null;
   const planTasks = Array.isArray(snapshot.plan?.tasks) ? snapshot.plan.tasks : [];
   const graphNodes = Array.isArray(snapshot.subagents?.graph?.nodes) ? snapshot.subagents.graph.nodes : [];
@@ -91,8 +91,8 @@ function taskProgress(snapshot) {
     seen.add(task.id);
     tasks.push({
       id: task.id,
-      label: task.subject || task.activeForm || task.id,
-      activeForm: task.activeForm || task.subject || task.id,
+      label: privateMode ? `Task ${tasks.length + 1}` : (task.subject || task.activeForm || task.id),
+      activeForm: privateMode ? `Task ${tasks.length + 1} in progress` : (task.activeForm || task.subject || task.id),
       status: task.status || states[task.id] || 'pending',
       dependencies: Array.isArray(task.dependencies) ? task.dependencies : [],
     });
@@ -101,8 +101,8 @@ function taskProgress(snapshot) {
     if (!node || typeof node !== 'object' || typeof node.id !== 'string' || seen.has(node.id)) continue;
     tasks.push({
       id: node.id,
-      label: node.description || node.id,
-      activeForm: node.description || node.id,
+      label: privateMode ? `Task ${tasks.length + 1}` : (node.description || node.id),
+      activeForm: privateMode ? `Task ${tasks.length + 1} in progress` : (node.description || node.id),
       status: states[node.id] || 'pending',
       dependencies: Array.isArray(node.dependencies) ? node.dependencies : [],
     });
@@ -123,9 +123,28 @@ function taskProgress(snapshot) {
   };
 }
 
-function renderModel(state = {}) {
+function usageModel(usage = {}, pricing = {}) {
+  const clean = {
+    inputTokens: Math.max(0, Number(usage.inputTokens) || 0),
+    outputTokens: Math.max(0, Number(usage.outputTokens) || 0),
+    cacheReadTokens: Math.max(0, Number(usage.cacheReadTokens) || 0),
+    cacheCreationTokens: Math.max(0, Number(usage.cacheCreationTokens) || 0),
+    durationMs: Math.max(0, Number(usage.durationMs) || 0),
+    calls: Math.max(0, Number(usage.calls) || 0),
+  };
+  const cost = (
+    clean.inputTokens * (Number(pricing.inputPerMillion) || 0)
+    + clean.outputTokens * (Number(pricing.outputPerMillion) || 0)
+    + clean.cacheReadTokens * (Number(pricing.cacheReadPerMillion) || 0)
+    + clean.cacheCreationTokens * (Number(pricing.cacheCreationPerMillion) || 0)
+  ) / 1_000_000;
+  return { ...clean, estimatedCost: cost > 0 ? cost : null };
+}
+
+function renderModel(state = {}, settings = {}) {
   const sessions = state.sessions || {};
   const entries = Object.entries(sessions);
+  const privateMode = settings.privacyMode === true;
 
   const rows = entries
     .map(([id, session]) => ({
@@ -137,25 +156,42 @@ function renderModel(state = {}) {
       statusLabel: statusLabel(session),
       tool: session.currentTool || null,
       toolKey: toolKeyFor(session.currentTool),
-      toolDescription: session.toolDescription || null,
+      toolDescription: privateMode
+        && session.status !== 'waitingApproval' && session.status !== 'waitingQuestion'
+        ? null : (session.toolDescription || null),
       pending: session.status === 'waitingApproval' || session.status === 'waitingQuestion',
       lastActivity: session.lastActivity || 0,
-      lastAssistantMessage: session.lastAssistantMessage || null,
+      lastAssistantMessage: privateMode ? null : (session.lastAssistantMessage || null),
       // Detail fields for the expandable row view; all null-safe so sessions
       // that predate these fields (or lack them entirely) render cleanly.
       model: session.model || null,
       failureCount: session.failureCount || 0,
       interrupted: session.interrupted || false,
-      lastUserPrompt: session.lastUserPrompt || null,
-      lastToolOutput: session.lastToolOutput || null,
-      lastToolError: session.lastToolError || null,
-      lastModelError: session.lastModelError || null,
+      lastUserPrompt: privateMode ? null : (session.lastUserPrompt || null),
+      lastToolOutput: privateMode ? null : (session.lastToolOutput || null),
+      lastToolError: privateMode ? null : (session.lastToolError || null),
+      lastModelError: privateMode ? null : (session.lastModelError || null),
       startTime: session.startTime || 0,
       // Compact timeline: newest first, capped at 10 entries so a long session
       // doesn't blow up the detail panel.
-      history: (session.history || []).slice(-10),
-      taskProgress: taskProgress(session.taskSnapshot),
-      loopOutcome: session.loopOutcome || null,
+      history: (session.history || []).slice(-10).map((item) => privateMode ? { ...item, description: null } : item),
+      taskProgress: taskProgress(session.taskSnapshot, privateMode),
+      loopOutcome: session.loopOutcome ? {
+        ...session.loopOutcome,
+        ...(privateMode ? {
+          reason: null,
+          verification: session.loopOutcome.verification
+            ? { passed: session.loopOutcome.verification.passed === true }
+            : null,
+        } : {}),
+      } : null,
+      usage: usageModel(session.usage, settings.pricing),
+      deliverables: (session.deliverables || []).map((item) => ({
+        ...item,
+        path: privateMode ? basename(item.path) : item.path,
+      })),
+      controls: Array.isArray(session.controlCapabilities) ? session.controlCapabilities : [],
+      privacyMode: privateMode,
     }))
     .sort((a, b) => {
       const pa = STATUS_PRIORITY[a.statusKey] ?? 1;
@@ -178,6 +214,8 @@ function renderModel(state = {}) {
     collapsed: !(hasPending || hasProgress),
     requiresAttention: hasPending,
     suggestsExpanded: hasPending || hasProgress,
+    autoExpand: settings.autoExpand !== false,
+    privacyMode: privateMode,
     count: rows.length,
     rows,
     // Quiet mode collapses the panel until a decision is pending, but the

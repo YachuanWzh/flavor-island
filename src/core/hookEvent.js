@@ -155,10 +155,12 @@ function parseHookEvent(buffer) {
     || firstDictNested(json, ['tool', 'payload', 'data'], ['input', 'tool_input', 'toolInput', 'arguments', 'args', 'params']);
   const agentId = typeof json.agent_id === 'string' ? json.agent_id : null;
   const eventId = firstString(json, ['event_id', 'eventId']);
+  const eventSequence = Number.isSafeInteger(json.event_sequence) ? json.event_sequence : null;
 
   return {
     eventName,
     eventId,
+    eventSequence,
     sessionId,
     toolName,
     toolUseId,

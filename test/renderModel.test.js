@@ -41,6 +41,18 @@ test('quiet activity stays collapsed but mascot reflects top state', () => {
   assert.equal(m.mascotState, 'running');
 });
 
+test('privacy mode hides sensitive details while keeping usage and basename deliverables', () => {
+  const m = renderModel({ sessions: { s1: session(Status.idle, {
+    lastUserPrompt: 'secret prompt', lastToolOutput: 'secret output',
+    deliverables: [{ path: 'C:\\private\\result.txt', operation: 'create', added: 4, removed: 0 }],
+    usage: { inputTokens: 1000, outputTokens: 500, cacheReadTokens: 200, cacheCreationTokens: 0, durationMs: 1200, calls: 1 },
+  }) } }, { privacyMode: true, pricing: { inputPerMillion: 1, outputPerMillion: 2 } });
+  assert.equal(m.rows[0].lastUserPrompt, null);
+  assert.equal(m.rows[0].lastToolOutput, null);
+  assert.equal(m.rows[0].deliverables[0].path, 'result.txt');
+  assert.equal(m.rows[0].usage.estimatedCost, 0.002);
+});
+
 test('waiting sessions sort above running above idle', () => {
   const m = renderModel({
     sessions: {

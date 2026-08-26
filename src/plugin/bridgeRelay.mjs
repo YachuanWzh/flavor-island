@@ -18,6 +18,7 @@ const DEFAULT_BLOCKING_TIMEOUT_MS = 86_400_000 - 5_000;
 
 export function createBridgeRelay(deps) {
   const { spawn, execPath, bridgePath } = deps;
+  const transform = typeof deps.transform === "function" ? deps.transform : (event) => event;
   const blockingTimeoutMs = deps.blockingTimeoutMs ?? DEFAULT_BLOCKING_TIMEOUT_MS;
   let child = null;
   let stdoutBuffer = "";
@@ -76,6 +77,9 @@ export function createBridgeRelay(deps) {
       || (event.type === "Notification" && typeof event.payload?.question === "string"));
     const id = nextId();
     const c = ensureChild();
+    let wireEvent;
+    try { wireEvent = transform(event); }
+    catch { wireEvent = { hook_event_name: event?.type || "Unknown", session_id: event?.payload?.sessionId || "default" }; }
     if (blocking) {
       return new Promise((resolve) => {
         const onAbort = () => {
@@ -106,7 +110,7 @@ export function createBridgeRelay(deps) {
         }, blockingTimeoutMs);
         pending.set(id, entry);
         try {
-          c.stdin.write(encodeRequest(id, event, true));
+          c.stdin.write(encodeRequest(id, wireEvent, true));
         } catch {
           pending.delete(id);
           signal?.removeEventListener("abort", onAbort);
@@ -117,7 +121,7 @@ export function createBridgeRelay(deps) {
     }
     if (c !== null) {
       try {
-        c.stdin.write(encodeRequest(id, event, false));
+        c.stdin.write(encodeRequest(id, wireEvent, false));
       } catch { /* daemon just died — non-blocking event lost, nothing to settle */ }
     }
     return Promise.resolve({ decision: "allow" });

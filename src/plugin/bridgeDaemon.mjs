@@ -31,11 +31,18 @@ function endpoint() {
 function toHookDecision(pipeResponse, event) {
   try {
     const parsed = JSON.parse(pipeResponse);
-    if (event?.type === "Notification" && typeof event?.payload?.question === "string"
+    if (parsed?.islandDecision === "ask") {
+      return { decision: "ask", reason: parsed.reason || "Flavor Island unavailable" };
+    }
+    if (event?.hook_event_name === "Notification" && typeof event?.question === "string"
       && parsed && typeof parsed.answer === "string") {
       return {
         decision: "allow",
-        updatedInput: { ...event.payload, answer: parsed.answer },
+        updatedInput: {
+          question: event.question,
+          ...(Array.isArray(event.question_options) ? { options: event.question_options } : {}),
+          answer: parsed.answer,
+        },
       };
     }
     const dec = parsed?.hookSpecificOutput?.decision;
@@ -46,13 +53,13 @@ function toHookDecision(pipeResponse, event) {
       // AskUserQuestion answers travel back inside updatedInput. flavor-code's
       // hook bus re-validates updatedInput against the PermissionRequest payload
       // shape, so wrap the answered tool input back into { tool, input, agent }.
-      if (dec.updatedInput && event?.type === "PermissionRequest" && event?.payload?.tool === "AskUserQuestion") {
+      if (dec.updatedInput && event?.hook_event_name === "PermissionRequest" && event?.tool_name === "AskUserQuestion") {
         return {
           decision: "allow",
           updatedInput: {
             tool: "AskUserQuestion",
             input: dec.updatedInput,
-            agent: event.payload.agent === "subagent" ? "subagent" : "main",
+            agent: event.agent_type === "subagent" ? "subagent" : "main",
           },
         };
       }
@@ -77,7 +84,7 @@ function handleRequest(request) {
   // every other pending request); fall back to forwarding the raw event.
   let transformed;
   try {
-    transformed = transformEvent(event);
+    transformed = event && typeof event.hook_event_name === "string" ? event : transformEvent(event);
   } catch {
     transformed = event;
   }
@@ -85,15 +92,17 @@ function handleRequest(request) {
     const socket = net.connect(endpoint());
     let response = "";
     let settled = false;
+    let timeout = null;
     const finish = () => {
       if (settled) return;
       settled = true;
+      if (timeout) clearTimeout(timeout);
       try { socket.destroy(); } catch { /* ignore */ }
       resolve();
     };
     if (!blocking) {
-      const t = setTimeout(finish, PIPE_TIMEOUT_MS);
-      if (t.unref) t.unref();
+      timeout = setTimeout(finish, PIPE_TIMEOUT_MS);
+      if (timeout.unref) timeout.unref();
     }
     socket.on("connect", () => {
       socket.write(JSON.stringify(transformed) + "\n", () => {
@@ -107,7 +116,7 @@ function handleRequest(request) {
     socket.on("close", () => {
       if (settled) return;
       if (blocking && response) {
-        writeResponse(id, { ok: true, decision: toHookDecision(response, event) });
+        writeResponse(id, { ok: true, decision: toHookDecision(response, transformed) });
       } else if (blocking) {
         writeResponse(id, { ok: false, reason: "island closed without a response" });
       }
@@ -123,11 +132,31 @@ function handleRequest(request) {
   });
 }
 
-// Line-buffered stdin: requests are single \n-terminated JSON lines. Requests
-// are handled concurrently — fire-and-forget frames complete quickly and a
-// blocking PermissionRequest never queues behind a slow non-blocking one.
+// Line-buffered stdin: requests are single \n-terminated JSON lines. Preserve
+// event order within one session while allowing different sessions to flow in
+// parallel. Hook callbacks can arrive concurrently, so forwarding everything
+// concurrently can otherwise render PostToolUse before PreToolUse.
 const active = new Set();
+const sessionTails = new Map();
 let buffer = "";
+
+function sessionKey(request) {
+  const event = request?.event;
+  return event?.session_id || event?.payload?.sessionId || '__legacy__';
+}
+
+function enqueue(request) {
+  const key = sessionKey(request);
+  const previous = sessionTails.get(key) || Promise.resolve();
+  const run = previous.catch(() => {}).then(() => handleRequest(request));
+  sessionTails.set(key, run);
+  active.add(run);
+  run.finally(() => {
+    active.delete(run);
+    if (sessionTails.get(key) === run) sessionTails.delete(key);
+  }).catch(() => { /* already settled */ });
+}
+
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (chunk) => {
   buffer += chunk;
@@ -139,9 +168,7 @@ process.stdin.on("data", (chunk) => {
     let request;
     try { request = JSON.parse(line); } catch { continue; }
     if (!request || typeof request !== "object" || Array.isArray(request) || typeof request.id !== "number") continue;
-    const run = handleRequest(request);
-    active.add(run);
-    run.finally(() => active.delete(run)).catch(() => { /* already settled */ });
+    enqueue(request);
   }
 });
 process.stdin.on("end", () => {

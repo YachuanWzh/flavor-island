@@ -22,6 +22,9 @@ function newSession() {
     cwd: null,
     model: null,
     cliPid: null,
+    controlEndpoint: null,
+    controlToken: null,
+    controlCapabilities: [],
     currentTool: null,
     toolDescription: null,
     // The tool actually executing, independent of what the island displays
@@ -37,6 +40,15 @@ function newSession() {
     interrupted: false,
     taskSnapshot: null,
     loopOutcome: null,
+    usage: {
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+      durationMs: 0,
+      calls: 0,
+    },
+    deliverables: [],
     history: [],
     recentMessages: [],
     startTime: Date.now(),
@@ -113,6 +125,15 @@ function applyMetadata(session, raw) {
   if (typeof raw.cwd === 'string' && raw.cwd) session.cwd = raw.cwd;
   if (typeof raw.model === 'string' && raw.model) session.model = raw.model;
   if (typeof raw._ppid === 'number' && raw._ppid > 0) session.cliPid = raw._ppid;
+  if (typeof raw.island_control_endpoint === 'string' && raw.island_control_endpoint) {
+    session.controlEndpoint = raw.island_control_endpoint;
+  }
+  if (typeof raw.island_control_token === 'string' && raw.island_control_token) {
+    session.controlToken = raw.island_control_token;
+  }
+  if (Array.isArray(raw.island_control_capabilities)) {
+    session.controlCapabilities = raw.island_control_capabilities.filter((item) => typeof item === 'string');
+  }
 }
 
 // Pure reducer: mutates `sessions`, returns { effects }.
@@ -144,6 +165,15 @@ function reduceEvent(sessions, event) {
     case 'UserPromptSubmit': {
       session.interrupted = false;
       session.loopOutcome = null;
+      session.usage = {
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+        durationMs: 0,
+        calls: 0,
+      };
+      session.deliverables = [];
       session.status = Status.processing;
       session.currentTool = null;
       session.toolDescription = null;
@@ -221,6 +251,9 @@ function reduceEvent(sessions, event) {
       session.activeTool = null;
       session.activeActivities = {};
       session.taskSnapshot = null;
+      session.deliverables = Array.isArray(raw.deliverables)
+        ? raw.deliverables.filter((item) => item && typeof item.path === 'string').slice(0, 100)
+        : session.deliverables;
       const msg = firstStringFromEvent(event, ['last_assistant_message', 'text', 'message', 'summary']);
       if (msg) {
         session.lastAssistantMessage = msg;
@@ -281,7 +314,15 @@ function reduceEvent(sessions, event) {
       // the user sees why the agent stalled instead of just "thinking".
       if (raw.providerError === true && typeof raw.errorMessage === 'string') {
         session.lastModelError = raw.errorMessage;
+      } else if (raw.providerError === false) {
+        session.lastModelError = null;
       }
+      session.usage.inputTokens += Number.isFinite(raw.input_tokens) ? Math.max(0, raw.input_tokens) : 0;
+      session.usage.outputTokens += Number.isFinite(raw.output_tokens) ? Math.max(0, raw.output_tokens) : 0;
+      session.usage.cacheReadTokens += Number.isFinite(raw.cache_read_tokens) ? Math.max(0, raw.cache_read_tokens) : 0;
+      session.usage.cacheCreationTokens += Number.isFinite(raw.cache_creation_tokens) ? Math.max(0, raw.cache_creation_tokens) : 0;
+      session.usage.durationMs += Number.isFinite(raw.model_duration_ms) ? Math.max(0, raw.model_duration_ms) : 0;
+      session.usage.calls += 1;
       break;
     case 'BeforePlan':
       // Planning is a distinct phase from tool execution, so the island can

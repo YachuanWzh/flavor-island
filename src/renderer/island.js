@@ -16,7 +16,8 @@ mascot.start();
 
 // Honor the OS reduced-motion setting for the pill width tween too (the CSS
 // media query already flattens stylesheet animations).
-const REDUCED_MOTION = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const SYSTEM_REDUCED_MOTION = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+let reducedMotion = SYSTEM_REDUCED_MOTION;
 
 // Vertical room reserved below the content so the drop shadow renders fully
 // instead of being clipped into a hard line by body{overflow:hidden}.
@@ -67,6 +68,10 @@ function fmtDuration(ms) {
   return `${Math.floor(total / 60)}m ${total % 60}s`;
 }
 
+function fmtTokens(value) {
+  return new Intl.NumberFormat('zh-CN', { notation: value >= 10000 ? 'compact' : 'standard', maximumFractionDigits: 1 }).format(value || 0);
+}
+
 // Build the expandable detail block for one row. Only non-empty fields are
 // emitted (empty sessions get a quiet placeholder); all text passes through
 // escapeHtml because history descriptions come straight from tool inputs.
@@ -78,6 +83,13 @@ function buildRowDetail(row) {
   };
 
   if (row.model) addRow('Model', `<span class="detail-value">${escapeHtml(row.model)}</span>`);
+  if (row.usage && row.usage.calls > 0) {
+    const usage = `${fmtTokens(row.usage.inputTokens)} in · ${fmtTokens(row.usage.outputTokens)} out`
+      + ` · cache ${fmtTokens(row.usage.cacheReadTokens)}/${fmtTokens(row.usage.cacheCreationTokens)}`
+      + ` · avg ${(row.usage.durationMs / Math.max(1, row.usage.calls) / 1000).toFixed(1)}s`
+      + (row.usage.estimatedCost == null ? '' : ` · $${row.usage.estimatedCost.toFixed(4)}`);
+    addRow('Usage', `<span class="detail-value">${escapeHtml(usage)}</span>`);
+  }
   if (row.startTime) {
     addRow('Running', `<span class="detail-value detail-duration" data-start-time="${row.startTime}">${fmtDuration(Date.now() - row.startTime)}</span>`);
   }
@@ -89,6 +101,14 @@ function buildRowDetail(row) {
   // more than 2000 chars of it into the detail panel.
   if (row.lastToolOutput) {
     addRow('Last output', `<div class="detail-scroll detail-pre">${escapeHtml(String(row.lastToolOutput).slice(0, 2000))}</div>`);
+  }
+  if (row.privacyMode) addRow('Privacy', '<span class="badge badge-private">Sensitive details hidden</span>');
+
+  if (row.deliverables && row.deliverables.length) {
+    const files = row.deliverables.map((file) => `<div class="deliverable"><span>${escapeHtml(file.operation || 'update')}</span>`
+      + `<b title="${escapeHtml(file.path)}">${escapeHtml(file.path)}</b>`
+      + `<em>+${Number(file.added) || 0} −${Number(file.removed) || 0}</em></div>`).join('');
+    addRow('Deliverables', `<div class="deliverables">${files}</div>`);
   }
 
   const badges = [];
@@ -209,7 +229,11 @@ function buildAskCard(div, pend) {
         };
         return { row, isSelected };
       });
-      const refreshRows = () => rows.forEach(({ row, isSelected }) => row.classList.toggle('selected', isSelected()));
+      const refreshRows = () => rows.forEach(({ row, isSelected }) => {
+        const selected = isSelected();
+        row.classList.toggle('selected', selected);
+        row.setAttribute('aria-selected', String(selected));
+      });
       rows.forEach(({ row }) => opts.appendChild(row));
       qEl.appendChild(opts);
       // Final custom-input item: a single horizontal row with a checkbox on the
@@ -244,6 +268,13 @@ function buildAskCard(div, pend) {
     askDrafts.delete(pend.key);
     window.flavorIsland.answerQuestions(pend.key, answers, details);
   };
+  div.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
+    if (!event.target.matches('.q-input')) return;
+    event.preventDefault();
+    refreshSubmit();
+    if (!submitBtn.disabled) submitBtn.click();
+  });
   refreshSubmit();
   actions.append(skip, submitBtn);
   div.appendChild(actions);
@@ -344,6 +375,12 @@ function appendLoopOutcome(div, loop) {
 function optionRow(label, description, multi, selected) {
   const row = document.createElement('div');
   row.className = `opt${multi ? ' opt-multi' : ''}${selected ? ' selected' : ''}`;
+  row.tabIndex = 0;
+  row.setAttribute('role', 'option');
+  row.setAttribute('aria-selected', String(selected));
+  row.onkeydown = (event) => {
+    if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); row.click(); }
+  };
   // The mark is a CSS-drawn radio/checkbox (circle vs rounded square) so it
   // stays crisp regardless of font glyph availability.
   const mark = document.createElement('span');
@@ -402,7 +439,7 @@ function customRow(q, qd, onChanged) {
   input.type = 'text';
   input.placeholder = '或输入自定义回答…';
   input.value = qd.otherText;
-  input.oninput = (e) => { qd.otherText = e.target.value; };
+  input.oninput = (e) => { qd.otherText = e.target.value; onChanged(); };
   // Refresh the Submit enabled state when focus leaves or Enter is pressed —
   // never mid-typing, so the input keeps focus.
   input.onchange = () => onChanged();
@@ -418,7 +455,7 @@ function textInput(qd, onChanged) {
   input.type = 'text';
   input.placeholder = '输入你的回答…';
   input.value = qd.otherText;
-  input.oninput = (e) => { qd.otherText = e.target.value; };
+  input.oninput = (e) => { qd.otherText = e.target.value; onChanged(); };
   // Refresh the Submit enabled state when focus leaves or Enter is pressed —
   // never mid-typing, so the input keeps focus.
   input.onchange = () => onChanged();
@@ -426,14 +463,91 @@ function textInput(qd, onChanged) {
   return input;
 }
 
-function render({ model, pending, sounds }) {
+function showToast(message, failed = false) {
+  let toast = document.getElementById('toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'toast';
+    document.body.appendChild(toast);
+  }
+  toast.className = failed ? 'toast toast-error' : 'toast';
+  toast.textContent = message;
+  clearTimeout(showToast.timer);
+  showToast.timer = setTimeout(() => { toast.classList.add('toast-out'); }, 2200);
+}
+
+function appendSessionControls(div, row) {
+  const capabilities = new Set(row.controls || []);
+  if (!capabilities.size) return;
+  const card = document.createElement('div');
+  card.className = 'control-card';
+  const head = document.createElement('div');
+  head.className = 'control-head';
+  head.innerHTML = '<span>SESSION CONTROL</span><i>LOCAL PIPE</i>';
+  const quick = document.createElement('div');
+  quick.className = 'control-quick';
+  const run = async (command, message, button) => {
+    button.disabled = true;
+    try {
+      await window.flavorIsland.control(row.id, command, message);
+      showToast(command === 'abort' ? '已发送停止请求' : command === 'focus' ? '已聚焦桌面任务' : '消息已发送');
+    } catch (error) {
+      showToast(error.message || '操作失败', true);
+    } finally { button.disabled = false; }
+  };
+  if (capabilities.has('focus')) {
+    const focus = document.createElement('button');
+    focus.className = 'mini-btn'; focus.type = 'button'; focus.textContent = '聚焦任务';
+    focus.onclick = () => run('focus', null, focus);
+    quick.appendChild(focus);
+  }
+  if (capabilities.has('abort') && row.statusKey !== 'idle') {
+    const stop = document.createElement('button');
+    stop.className = 'mini-btn mini-danger'; stop.type = 'button'; stop.textContent = '停止任务';
+    stop.onclick = () => { if (confirm('停止这个 flavor-code 任务？')) run('abort', null, stop); };
+    quick.appendChild(stop);
+  }
+  card.append(head, quick);
+  if (capabilities.has('steer') || capabilities.has('follow_up')) {
+    const compose = document.createElement('div');
+    compose.className = 'control-compose';
+    const input = document.createElement('input');
+    input.type = 'text'; input.placeholder = '追加指令或下一轮消息…'; input.setAttribute('aria-label', '会话消息');
+    const send = document.createElement('button');
+    send.type = 'button'; send.className = 'mini-btn';
+    const preferFollowUp = row.statusKey === 'idle' && capabilities.has('follow_up');
+    send.textContent = preferFollowUp ? 'Follow-up' : 'Steer';
+    const command = preferFollowUp ? 'follow_up' : 'steer';
+    const submit = async () => {
+      const message = input.value.trim();
+      if (!message) return;
+      await run(command, message, send);
+      if (!send.disabled) input.value = '';
+    };
+    send.onclick = submit;
+    input.onkeydown = (event) => {
+      if (event.key === 'Enter' && !event.isComposing) { event.preventDefault(); submit(); }
+    };
+    input.oninput = () => { send.disabled = !input.value.trim(); };
+    send.disabled = true;
+    compose.append(input, send);
+    card.appendChild(compose);
+  }
+  div.appendChild(card);
+}
+
+function render({ model, pending, sounds, settings = {} }) {
   // Keep the latest push so a detail toggle can re-render without a new push.
-  lastRenderState = { model, pending, sounds };
+  lastRenderState = { model, pending, sounds, settings };
+  reducedMotion = settings.motion === 'reduced'
+    || (settings.motion !== 'full' && SYSTEM_REDUCED_MOTION);
+  document.body.classList.toggle('reduce-motion', reducedMotion);
+  if (typeof mascot.setReducedMotion === 'function') mascot.setReducedMotion(reducedMotion);
   (sounds || []).forEach(playSound);
 
   // Pill
-  const panelOpen = model.requiresAttention || (manualPanelOpen === null
-    ? !model.collapsed
+  const panelOpen = (model.autoExpand && model.requiresAttention) || (manualPanelOpen === null
+    ? (model.autoExpand && !model.collapsed)
     : manualPanelOpen);
   islandEl.classList.toggle('collapsed', !panelOpen);
   pillEl.setAttribute('aria-expanded', String(panelOpen));
@@ -466,7 +580,7 @@ function render({ model, pending, sounds }) {
     pillStatusEl.textContent = top.statusLabel;
   }
 
-  if (!REDUCED_MOTION && typeof pillEl.animate === 'function') {
+  if (!reducedMotion && typeof pillEl.animate === 'function') {
     const pillW1 = pillEl.getBoundingClientRect().width;
     if (Math.abs(pillW1 - pillW0) > 2) {
       pillEl.animate(
@@ -489,13 +603,19 @@ function render({ model, pending, sounds }) {
     lastRowSet = rowSet;
     openDetailId = null;
   }
+  const active = document.activeElement;
+  const focusKey = active?.dataset?.focusKey || null;
+  const selection = active && typeof active.selectionStart === 'number'
+    ? { start: active.selectionStart, end: active.selectionEnd } : null;
   panelEl.innerHTML = '';
   // Multi-session navigation: a small heading names the session count so the
   // expanded panel reads as a session list rather than a single status card.
   if (model.count > 0) {
     const head = document.createElement('div');
     head.className = 'panel-head';
-    head.textContent = `${model.count} session${model.count === 1 ? '' : 's'}`;
+    head.innerHTML = `<span>${model.count} session${model.count === 1 ? '' : 's'}</span>`
+      + `<button class="settings-btn" type="button" aria-label="打开设置" title="设置">⚙</button>`;
+    head.querySelector('.settings-btn').onclick = () => window.flavorIsland.openSettings();
     panelEl.appendChild(head);
   }
   const stagger = !panelEl.classList.contains('settled');
@@ -516,7 +636,7 @@ function render({ model, pending, sounds }) {
     const isOpen = row.id === openDetailId;
     div.classList.toggle('open', isOpen);
     div.innerHTML = `
-      <div class="row-head">
+      <div class="row-head" role="button" tabindex="0" aria-expanded="${isOpen}">
         <img class="row-icon" src="../assets/flavor.png" alt="" />
         <span class="row-title">${escapeHtml(row.title)}</span>
         <span class="${statusClass}">${escapeHtml(statusText)}</span>
@@ -529,13 +649,18 @@ function render({ model, pending, sounds }) {
     // ask-card inputs live outside .row-head (in .actions / ask cards), so
     // their clicks never reach this handler. Opening one row closes any other
     // open detail.
-    div.querySelector('.row-head').addEventListener('click', () => {
+    const rowHead = div.querySelector('.row-head');
+    rowHead.addEventListener('click', () => {
       openDetailId = openDetailId === row.id ? null : row.id;
       rerender();
+    });
+    rowHead.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); rowHead.click(); }
     });
     if (isOpen && row.startTime) ensureDurationTimer();
     appendTaskBoard(div, row.taskProgress);
     appendLoopOutcome(div, row.loopOutcome);
+    if (isOpen) appendSessionControls(div, row);
     if (pend && pend.kind === 'permission') {
       if (pend.reason || pend.toolCategory) {
         const context = document.createElement('div');
@@ -586,8 +711,21 @@ function render({ model, pending, sounds }) {
     } else if (pend && pend.kind === 'question') {
       buildPlainQuestionCard(div, pend);
     }
+    div.querySelectorAll('button,input,.opt,.row-head').forEach((element, index) => {
+      element.dataset.focusKey = `${row.id}:${index}`;
+    });
     panelEl.appendChild(div);
   });
+
+  if (focusKey) {
+    const next = [...panelEl.querySelectorAll('[data-focus-key]')].find((element) => element.dataset.focusKey === focusKey);
+    if (next) {
+      next.focus({ preventScroll: true });
+      if (selection && typeof next.setSelectionRange === 'function') {
+        try { next.setSelectionRange(selection.start, selection.end); } catch { /* input type may not support selection */ }
+      }
+    }
+  }
 
   // Ask main to fit the window to content. The island now fills the window
   // (height:100%) so its layout box equals the current window height, not the

@@ -33,6 +33,36 @@ test('SessionStart creates a session and applies metadata', () => {
   assert.equal(s.cliPid, 42);
 });
 
+test('SessionStart stores local control metadata without exposing it to tools', () => {
+  const sessions = {};
+  reduceEvent(sessions, evt('SessionStart', {
+    rawJSON: {
+      island_control_endpoint: '\\\\.\\pipe\\session', island_control_token: 'token',
+      island_control_capabilities: ['abort', 'steer'],
+    },
+  }));
+  assert.equal(sessions.s1.controlToken, 'token');
+  assert.deepEqual(sessions.s1.controlCapabilities, ['abort', 'steer']);
+});
+
+test('AfterModelCall aggregates usage and Stop records deliverables', () => {
+  const sessions = {};
+  reduceEvent(sessions, evt('SessionStart'));
+  reduceEvent(sessions, evt('AfterModelCall', { rawJSON: {
+    input_tokens: 100, output_tokens: 20, cache_read_tokens: 30,
+    cache_creation_tokens: 4, model_duration_ms: 750, providerError: false,
+  } }));
+  reduceEvent(sessions, evt('Stop', { rawJSON: {
+    summary: 'Done', deliverables: [{ path: 'src/a.js', operation: 'update', added: 2, removed: 1 }],
+  } }));
+  assert.deepEqual(sessions.s1.usage, {
+    inputTokens: 100, outputTokens: 20, cacheReadTokens: 30,
+    cacheCreationTokens: 4, durationMs: 750, calls: 1,
+  });
+  assert.equal(sessions.s1.lastAssistantMessage, 'Done');
+  assert.equal(sessions.s1.deliverables[0].path, 'src/a.js');
+});
+
 test('UserPromptSubmit sets processing and records prompt', () => {
   const sessions = {};
   reduceEvent(sessions, evt('UserPromptSubmit', { rawJSON: { prompt: 'hello' } }));

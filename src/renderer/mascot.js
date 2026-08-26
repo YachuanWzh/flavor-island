@@ -50,7 +50,7 @@ function createMascot(canvas) {
   let timer = 0;
   let running = false;
   const t0 = performance.now();
-  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   // SVG-units → pixels mapper (y0 shifts the SVG origin down so scenes sit
   // nicely inside the square frame).
@@ -339,6 +339,14 @@ function createMascot(canvas) {
         drawFrame();
         schedule();
       }
+    },
+    setReducedMotion(next) {
+      const changed = reducedMotion !== !!next;
+      reducedMotion = !!next;
+      if (!changed) return;
+      cancelScheduledFrame();
+      drawFrame();
+      schedule();
     },
   };
 }

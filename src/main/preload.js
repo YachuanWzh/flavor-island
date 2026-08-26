@@ -12,5 +12,7 @@ contextBridge.exposeInMainWorld('flavorIsland', {
   answer: (key, answer) => ipcRenderer.send('question-answer', { key, answer }),
   answerQuestions: (key, answers, details) => ipcRenderer.send('ask-answer', { key, answers, details }),
   skipQuestions: (key) => ipcRenderer.send('ask-skip', { key }),
+  control: (sessionId, command, message) => ipcRenderer.invoke('session-control', { sessionId, command, message }),
+  openSettings: () => ipcRenderer.invoke('settings-open'),
   quit: () => ipcRenderer.send('quit'),
 });

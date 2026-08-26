@@ -17,16 +17,17 @@ function clampWindowHeight(requested, available, { min = 1, topMargin = 0 } = {}
 // coordinates and only re-clamp the height, so content-driven resizes no longer
 // snap the island back to center.
 function computeWindowBounds(requestedHeight, { workArea, width, topMargin = 0, min = 1, userPosition = null } = {}) {
-  const height = clampWindowHeight(requestedHeight, workArea.height, { min, topMargin });
   let x;
   let y;
   if (userPosition) {
-    x = Math.round(userPosition.x);
-    y = Math.round(userPosition.y);
+    x = Math.round(Math.min(Math.max(userPosition.x, workArea.x), workArea.x + Math.max(0, workArea.width - width)));
+    y = Math.round(Math.min(Math.max(userPosition.y, workArea.y), workArea.y + Math.max(0, workArea.height - min)));
   } else {
     x = Math.round(workArea.x + (workArea.width - width) / 2);
-    y = topMargin;
+    y = Math.round(workArea.y + topMargin);
   }
+  const availableBelow = Math.max(min, workArea.y + workArea.height - y);
+  const height = Math.round(Math.min(Math.max(requestedHeight, min), availableBelow));
   return { x, y, width, height };
 }
 

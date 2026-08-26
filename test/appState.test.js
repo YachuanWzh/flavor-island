@@ -26,6 +26,24 @@ test('handleEvent routes to reducer and notifies subscribers', () => {
   assert.equal(snap.status, Status.processing);
 });
 
+test('stale sequenced events are ignored after a newer event', () => {
+  const state = createAppState();
+  state.handleEvent(evt('SessionStart', { eventSequence: 1 }));
+  state.handleEvent(evt('UserPromptSubmit', { eventSequence: 3, rawJSON: { prompt: 'new' } }));
+  state.handleEvent(evt('UserPromptSubmit', { eventSequence: 2, rawJSON: { prompt: 'stale' } }));
+  assert.equal(state.snapshot().sessions.s1.lastUserPrompt, 'new');
+});
+
+test('fallbackPending releases blocking work back to flavor-code', async () => {
+  const state = createAppState();
+  const permission = state.requestPermission(evt('PermissionRequest', { toolName: 'Bash' }));
+  const question = state.requestQuestion(evt('Notification', { rawJSON: { question: 'Continue?' } }));
+  assert.equal(state.fallbackPending('renderer gone'), true);
+  assert.equal(await permission, 'ask');
+  assert.deepEqual(await question, { islandDecision: 'ask', reason: 'renderer gone' });
+  assert.equal(state.listPending().length, 0);
+});
+
 test('requestPermission blocks until resolved', async () => {
   const state = createAppState();
   const decision = state.requestPermission(evt('PermissionRequest', { toolName: 'Bash' }));
