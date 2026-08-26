@@ -47,7 +47,10 @@ function createMascot(canvas) {
   const ctx = canvas.getContext('2d');
   let state = 'idle';
   let raf = 0;
+  let timer = 0;
+  let running = false;
   const t0 = performance.now();
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   // SVG-units → pixels mapper (y0 shifts the SVG origin down so scenes sit
   // nicely inside the square frame).
@@ -261,18 +264,39 @@ function createMascot(canvas) {
     }
   }
 
-  function frame() {
+  function drawFrame() {
     const dpr = window.devicePixelRatio || 1;
     const w = canvas.width / dpr;
     const h = canvas.height / dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
-    const t = (performance.now() - t0) / 1000;
+    const t = reducedMotion ? 0 : (performance.now() - t0) / 1000;
     const scene = sceneForState(state);
     if (scene === 'alert') drawAlert(w, h, t);
     else if (scene === 'work') drawWork(w, h, t);
     else drawSleep(w, h, t);
-    raf = requestAnimationFrame(frame);
+  }
+
+  // Idle animation is intentionally low-frequency; active work stays smooth
+  // without waking the renderer 60 times per second forever.
+  function schedule() {
+    if (!running || reducedMotion || document.hidden || timer || raf) return;
+    const interval = sceneForState(state) === 'sleep' ? 125 : 50;
+    timer = window.setTimeout(() => {
+      timer = 0;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        drawFrame();
+        schedule();
+      });
+    }, interval);
+  }
+
+  function cancelScheduledFrame() {
+    if (timer) window.clearTimeout(timer);
+    if (raf) cancelAnimationFrame(raf);
+    timer = 0;
+    raf = 0;
   }
 
   // Size the backing store to the CSS size × devicePixelRatio for crisp rects.
@@ -281,21 +305,40 @@ function createMascot(canvas) {
     const sizePx = Math.max(1, Math.round(canvas.clientWidth || 24));
     canvas.width = sizePx * dpr;
     canvas.height = sizePx * dpr;
+    drawFrame();
+  }
+
+  function onVisibilityChange() {
+    cancelScheduledFrame();
+    if (!document.hidden) {
+      drawFrame();
+      schedule();
+    }
   }
 
   return {
     start() {
+      if (running) return;
+      running = true;
       resize();
       window.addEventListener('resize', resize);
-      if (!raf) raf = requestAnimationFrame(frame);
+      document.addEventListener('visibilitychange', onVisibilityChange);
+      schedule();
     },
     stop() {
-      cancelAnimationFrame(raf);
-      raf = 0;
+      running = false;
+      cancelScheduledFrame();
       window.removeEventListener('resize', resize);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
     },
     setState(next) {
+      const changed = state !== (next || 'idle');
       state = next || 'idle';
+      if (changed) {
+        cancelScheduledFrame();
+        drawFrame();
+        schedule();
+      }
     },
   };
 }

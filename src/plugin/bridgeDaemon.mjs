@@ -31,6 +31,13 @@ function endpoint() {
 function toHookDecision(pipeResponse, event) {
   try {
     const parsed = JSON.parse(pipeResponse);
+    if (event?.type === "Notification" && typeof event?.payload?.question === "string"
+      && parsed && typeof parsed.answer === "string") {
+      return {
+        decision: "allow",
+        updatedInput: { ...event.payload, answer: parsed.answer },
+      };
+    }
     const dec = parsed?.hookSpecificOutput?.decision;
     if (dec?.behavior === "allow") {
       if (Array.isArray(dec.updatedPermissions) && dec.updatedPermissions.length > 0) {
@@ -90,10 +97,10 @@ function handleRequest(request) {
     }
     socket.on("connect", () => {
       socket.write(JSON.stringify(transformed) + "\n", () => {
-        // Data flushed to the kernel. Fire-and-forget requests are done — drop
-        // the connection without waiting for the island's '{}' reply. Blocking
-        // requests keep the socket open and wait for the decision.
-        if (!blocking) finish();
+        // The relay caller is already fire-and-forget, but keep this daemon-side
+        // socket alive until the island writes its tiny acknowledgement. Closing
+        // immediately after the flush races the server's socket.end('{}') and
+        // produces EPIPE on fast local named pipes.
       });
     });
     socket.on("data", (d) => { response += d.toString("utf8"); });

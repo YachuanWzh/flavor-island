@@ -21,12 +21,12 @@ const KNOWN_HOOK_NAMES = new Set([
   'BeforePlan', 'AfterPlan', 'SubagentStart', 'SubagentStop',
   'BeforeModelCall', 'AfterModelCall', 'PreToolUse', 'PermissionRequest',
   'PostToolUse', 'PostToolUseFailure', 'PreCompact', 'PostCompact',
-  'PluginLoad', 'PluginUnload', 'Notification',
+  'PluginLoad', 'PluginUnload', 'Notification', 'LoopEnd',
 ]);
 
 // The five events this task adds: model-call lifecycle, plan lifecycle, and the
 // compaction recovery signal.
-const NEW_HOOK_NAMES = ['BeforeModelCall', 'AfterModelCall', 'BeforePlan', 'AfterPlan', 'PostCompact'];
+const NEW_HOOK_NAMES = ['BeforeModelCall', 'AfterModelCall', 'BeforePlan', 'AfterPlan', 'PostCompact', 'LoopEnd'];
 
 function readManifest() {
   return JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf8'));
@@ -49,14 +49,14 @@ function activateHookNames() {
   return [...body.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
 }
 
-test('manifest declares the five new hook events', () => {
+test('manifest declares the new hook events', () => {
   const names = manifestHookNames();
   for (const name of NEW_HOOK_NAMES) {
     assert.ok(names.includes(name), `manifest missing hook ${name}`);
   }
 });
 
-test('activate.mjs registers the five new hook events', () => {
+test('activate.mjs registers the new hook events', () => {
   const names = activateHookNames();
   for (const name of NEW_HOOK_NAMES) {
     assert.ok(names.includes(name), `activate.mjs missing hook ${name}`);

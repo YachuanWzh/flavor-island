@@ -72,7 +72,8 @@ export function createBridgeRelay(deps) {
   }
 
   function relay(event, signal) {
-    const blocking = event && event.type === "PermissionRequest";
+    const blocking = event && (event.type === "PermissionRequest"
+      || (event.type === "Notification" && typeof event.payload?.question === "string"));
     const id = nextId();
     const c = ensureChild();
     if (blocking) {

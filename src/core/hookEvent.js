@@ -154,9 +154,11 @@ function parseHookEvent(buffer) {
   const toolInput = firstDict(json, ['tool_input', 'toolInput', 'input', 'arguments', 'args', 'params'])
     || firstDictNested(json, ['tool', 'payload', 'data'], ['input', 'tool_input', 'toolInput', 'arguments', 'args', 'params']);
   const agentId = typeof json.agent_id === 'string' ? json.agent_id : null;
+  const eventId = firstString(json, ['event_id', 'eventId']);
 
   return {
     eventName,
+    eventId,
     sessionId,
     toolName,
     toolUseId,

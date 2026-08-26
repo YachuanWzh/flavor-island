@@ -40,11 +40,6 @@ function createAppState(options = {}) {
   // outcome instead of spawning a second card.
   const recentDecisions = new Map();
   const RECENT_DECISION_TTL_MS = 30_000;
-  // sessionId -> Set of tool names the user "Allow all"-ed this session.
-  // flavor-code only records the rule in its own process, and every later
-  // call is still relayed here — so the island keeps its own copy and
-  // auto-approves matching calls instead of showing a card each time.
-  const allowAllRules = new Map();
   // sessionId -> tool-display scheduler state (see the smoothing block above).
   const toolDisplay = new Map();
   let seq = 0;
@@ -60,7 +55,6 @@ function createAppState(options = {}) {
       if (e.type === 'removeSession') {
         denyPendingForSession(e.sessionId);
         delete sessions[e.sessionId];
-        allowAllRules.delete(e.sessionId);
         // Session-scoped state dies with the session: drop replay cache
         // entries that belong to it (dedupe keys are prefixed by session id).
         for (const [key, entry] of recentDecisions) {
@@ -76,7 +70,7 @@ function createAppState(options = {}) {
     for (const [key, entry] of pending) {
       if (entry.sessionId === sessionId) {
         const value = denyValueFor(entry.kind);
-        if ((entry.kind === 'permission' || entry.kind === 'askUserQuestion') && entry.dedupeKey) {
+        if ((entry.kind === 'permission' || entry.kind === 'askUserQuestion') && entry.replayable) {
           recentDecisions.set(entry.dedupeKey, { decision: value, at: Date.now() });
         }
         entry.resolve(value);
@@ -114,6 +108,7 @@ function createAppState(options = {}) {
         if (d.holdTimer) { d.holdTimer.clear(); d.holdTimer = null; }
         d.shown = null;
         d.pending = null;
+        d.active.clear();
       }
     }
     notify(effects);
@@ -127,6 +122,7 @@ function createAppState(options = {}) {
         shown: null,     // { tool, description } currently surfaced to the UI
         shownAt: 0,
         pending: null,   // latest tool waiting out the reveal delay
+        active: new Map(),
       });
     }
     return toolDisplay.get(sessionId);
@@ -147,9 +143,12 @@ function createAppState(options = {}) {
     const d = displayFor(sessionId);
     const tool = event.toolName || null;
     const description = event.toolDescription || null;
+    const activityId = event.toolUseId || event.agentId || event.eventId || 'legacy';
+    const activity = { id: activityId, tool, description };
+    d.active.set(activityId, activity);
     // Queue for reveal. A newer tool always supersedes the pending one — the
     // pill shows what's actually running, never a stale intermediate.
-    d.pending = { tool, description };
+    d.pending = activity;
     if (d.shown) {
       // A chip is already on screen (min hold still running): the reducer just
       // overwrote currentTool with the newcomer — restore the displayed tool
@@ -221,30 +220,37 @@ function createAppState(options = {}) {
     if (d && d.pending && !d.shown) scheduleReveal(sessionId);
   }
 
-  // Hook events alternate strictly Pre→Post per session, so the event ending
-  // now is the newest one started: it is `pending` when set, otherwise `shown`.
+  // Match completion to its protocol tool-call id. Parallel read-only calls
+  // can finish out of order, so completing one must not hide another.
   function endToolDisplay(event) {
     const sessionId = event.sessionId || 'default';
     const session = sessions[sessionId];
     const d = toolDisplay.get(sessionId);
     if (!session || !d) return;
+    const activityId = event.toolUseId || event.agentId || event.eventId || 'legacy';
+    d.active.delete(activityId);
     session.lastActivity = now();
     // History recording is the reducer's job (via session.activeTool) — this
     // layer only decides what the pill keeps showing.
-    if (d.pending) {
+    if (d.pending?.id === activityId) {
       // Finished before (or while waiting out) the reveal delay: silently drop
       // it — the pill never knew about this call.
       if (d.revealTimer) { d.revealTimer.clear(); d.revealTimer = null; }
       d.pending = null;
+      if (!d.shown) {
+        d.pending = [...d.active.values()].at(-1) || null;
+        scheduleReveal(sessionId);
+      }
       return;
     }
-    if (!d.shown) return;
+    if (!d.shown || d.shown.id !== activityId) return;
     const held = now() - d.shownAt;
     if (held >= TOOL_MIN_HOLD_MS) {
       // Shown long enough — drop it now, then give any queued tool its own
       // reveal delay instead of flashing it in immediately.
       d.shown = null;
       applyToolDisplay(session, sessionId);
+      if (!d.pending) d.pending = [...d.active.values()].at(-1) || null;
       scheduleReveal(sessionId);
     } else if (!d.holdTimer) {
       // Too quick to drop: the reducer already cleared currentTool — re-apply
@@ -260,6 +266,7 @@ function createAppState(options = {}) {
         if (s.status !== Status.running && s.status !== Status.processing) return;
         d.shown = null;
         applyToolDisplay(s, sessionId);
+        if (!d.pending) d.pending = [...d.active.values()].at(-1) || null;
         scheduleReveal(sessionId);
       }, TOOL_MIN_HOLD_MS - held);
     }
@@ -275,6 +282,7 @@ function createAppState(options = {}) {
   // event carry identical session/tool/input, while genuinely separate calls
   // almost always differ in tool_input.
   function permissionDedupeKey(event) {
+    if (event.eventId) return `${event.sessionId || 'default'}\u0001event:${event.eventId}`;
     let input = '';
     try { input = JSON.stringify(event.toolInput || null); } catch { input = ''; }
     return [
@@ -295,13 +303,8 @@ function createAppState(options = {}) {
     const sessionId = event.sessionId || 'default';
     ensureSession(sessionId);
 
-    // "Allow all" already granted for this tool in this session -> approve
-    // silently without surfacing a card.
-    if (allowAllRules.get(sessionId)?.has(event.toolName || '')) {
-      return Promise.resolve('allow');
-    }
-
     const dedupeKey = permissionDedupeKey(event);
+    const replayable = !!event.eventId;
     // Duplicate while the primary is still waiting -> share its promise so
     // both relay sockets get the same decision from one card.
     for (const entry of pending.values()) {
@@ -310,7 +313,7 @@ function createAppState(options = {}) {
     // Duplicate arriving right after the primary resolved (the second plugin's
     // relay runs sequentially after the first) -> replay the decision.
     pruneRecentDecisions();
-    const recent = recentDecisions.get(dedupeKey);
+    const recent = replayable ? recentDecisions.get(dedupeKey) : null;
     if (recent) return Promise.resolve(recent.decision);
 
     const s = sessions[sessionId];
@@ -321,7 +324,7 @@ function createAppState(options = {}) {
 
     const key = `perm-${++seq}`;
     const promise = new Promise((resolve) => {
-      pending.set(key, { resolve, event, sessionId, kind: 'permission', dedupeKey });
+      pending.set(key, { resolve, event, sessionId, kind: 'permission', dedupeKey, replayable });
     });
     pending.get(key).promise = promise;
     notify([{ type: 'playSound', event: 'PermissionRequest' }]);
@@ -333,7 +336,8 @@ function createAppState(options = {}) {
     ensureSession(sessionId);
     const s = sessions[sessionId];
     s.status = Status.waitingQuestion;
-    s.toolDescription = event.toolDescription || s.toolDescription;
+    s.toolDescription = (typeof event.rawJSON?.question === 'string' && event.rawJSON.question)
+      || event.toolDescription || s.toolDescription;
     s.lastActivity = Date.now();
 
     const key = `ques-${++seq}`;
@@ -361,11 +365,12 @@ function createAppState(options = {}) {
     }
 
     const dedupeKey = permissionDedupeKey(event);
+    const replayable = !!event.eventId;
     for (const entry of pending.values()) {
       if (entry.kind === 'askUserQuestion' && entry.dedupeKey === dedupeKey) return entry.promise;
     }
     pruneRecentDecisions();
-    const recent = recentDecisions.get(dedupeKey);
+    const recent = replayable ? recentDecisions.get(dedupeKey) : null;
     if (recent) return Promise.resolve(recent.decision);
 
     const s = sessions[sessionId];
@@ -375,7 +380,7 @@ function createAppState(options = {}) {
 
     const key = `ask-${++seq}`;
     const promise = new Promise((resolve) => {
-      pending.set(key, { resolve, event, sessionId, kind: 'askUserQuestion', questions, dedupeKey });
+      pending.set(key, { resolve, event, sessionId, kind: 'askUserQuestion', questions, dedupeKey, replayable });
     });
     pending.get(key).promise = promise;
     notify([{ type: 'playSound', event: 'PermissionRequest' }]);
@@ -392,7 +397,7 @@ function createAppState(options = {}) {
     pending.delete(key);
     clearWaitingQuestion(entry.sessionId);
     const response = buildAllowResponse(entry.event, answers || {}, details || {});
-    if (entry.dedupeKey) {
+    if (entry.replayable) {
       recentDecisions.set(entry.dedupeKey, { decision: response, at: Date.now() });
     }
     entry.resolve(response);
@@ -406,7 +411,7 @@ function createAppState(options = {}) {
     pending.delete(key);
     clearWaitingQuestion(entry.sessionId);
     const response = buildDenyResponse();
-    if (entry.dedupeKey) {
+    if (entry.replayable) {
       recentDecisions.set(entry.dedupeKey, { decision: response, at: Date.now() });
     }
     entry.resolve(response);
@@ -435,11 +440,9 @@ function createAppState(options = {}) {
       s.currentTool = null;
       s.toolDescription = null;
     }
-    // Pass the decision through verbatim: 'deny', 'allow', or 'allowAll' (allow
-    // this call and record a same-tool session rule so later calls of that
-    // tool auto-approve). The hook server turns it into the right
-    // PermissionRequest response. Anything unexpected falls back to a plain
-    // allow.
+    // Pass the decision through verbatim. flavor-code is the authority that
+    // decides whether a category can be persisted for this session; keeping a
+    // second local allow-list here could auto-approve destructive calls.
     const decision = behavior === 'deny' || behavior === 'allowAll' ? behavior : 'allow';
     if (decision === 'deny') {
       // A denied tool never runs — forget its pending chip entirely.
@@ -452,11 +455,7 @@ function createAppState(options = {}) {
       // Allowed: the tool starts executing now — re-arm its reveal.
       resumeToolReveal(entry.sessionId);
     }
-    if (decision === 'allowAll' && entry.event.toolName) {
-      if (!allowAllRules.has(entry.sessionId)) allowAllRules.set(entry.sessionId, new Set());
-      allowAllRules.get(entry.sessionId).add(entry.event.toolName);
-    }
-    if (entry.kind === 'permission' && entry.dedupeKey) {
+    if (entry.kind === 'permission' && entry.replayable) {
       recentDecisions.set(entry.dedupeKey, { decision, at: Date.now() });
     }
     entry.resolve(decision);
@@ -490,7 +489,15 @@ function createAppState(options = {}) {
       kind: e.kind,
       toolName: e.event.toolName || null,
       toolDescription: e.event.toolDescription || null,
+      reason: typeof e.event.rawJSON?.approval_reason === 'string'
+        ? e.event.rawJSON.approval_reason
+        : (typeof e.event.rawJSON?.message === 'string' ? e.event.rawJSON.message : null),
+      toolCategory: typeof e.event.rawJSON?.tool_category === 'string'
+        ? e.event.rawJSON.tool_category : null,
+      allowAlways: e.event.rawJSON?.allow_always === true,
       questions: e.questions || null,
+      question: typeof e.event.rawJSON?.question === 'string' ? e.event.rawJSON.question : null,
+      options: Array.isArray(e.event.rawJSON?.question_options) ? e.event.rawJSON.question_options : null,
     }));
   }
 

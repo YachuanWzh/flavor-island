@@ -70,6 +70,29 @@ test('baseline: session identity metadata is preserved', () => {
   assert.ok(out._ppid > 0);
 });
 
+test('protocol v2 preserves stable session, event, and tool-call identity', () => {
+  const out = transformEvent(evt('PermissionRequest', {
+    protocolVersion: 2,
+    sessionId: 'session-stable',
+    eventId: 'event-7',
+    sequence: 7,
+    timestamp: '2026-08-26T00:00:00.000Z',
+    toolCallId: 'call-2',
+    tool: 'Shell',
+    reason: 'Command writes outside the workspace',
+    toolCategory: 'shell',
+    allowAlways: false,
+  }));
+  assert.equal(out.session_id, 'session-stable');
+  assert.equal(out.event_id, 'event-7');
+  assert.equal(out.event_sequence, 7);
+  assert.equal(out.event_timestamp, '2026-08-26T00:00:00.000Z');
+  assert.equal(out.tool_use_id, 'call-2');
+  assert.equal(out.approval_reason, 'Command writes outside the workspace');
+  assert.equal(out.tool_category, 'shell');
+  assert.equal(out.allow_always, false);
+});
+
 test('PostToolUse: output string passes through', () => {
   const out = transformEvent(evt('PostToolUse', {
     tool: 'Bash',
@@ -136,4 +159,33 @@ test('AfterModelCall: absent provider fields leave keys absent', () => {
   const out = transformEvent(evt('AfterModelCall', { modelId: 'deepseek-v4' }));
   assert.ok(!('providerError' in out));
   assert.ok(!('errorMessage' in out));
+});
+
+test('task snapshot notification keeps the nested task contract', () => {
+  const snapshot = {
+    plan: { tasks: [{ id: 't1', subject: 'Cache', activeForm: 'Implementing cache', status: 'in_progress', dependencies: [] }] },
+    subagents: { states: {} },
+    foregroundTaskId: 't1',
+  };
+  const out = transformEvent(evt('Notification', { kind: 'task_snapshot', taskSnapshot: snapshot }));
+  assert.equal(out.notification_kind, 'task_snapshot');
+  assert.deepEqual(out.task_snapshot, snapshot);
+});
+
+test('LoopEnd maps terminal outcome and verification evidence', () => {
+  const out = transformEvent(evt('LoopEnd', {
+    loopId: 'loop-1', outcome: 'failed', reason: 'tests failed',
+    verification: { passed: false, summary: '1 test failed' },
+  }));
+  assert.equal(out.loop_id, 'loop-1');
+  assert.equal(out.loop_outcome, 'failed');
+  assert.equal(out.loop_reason, 'tests failed');
+  assert.deepEqual(out.loop_verification, { passed: false, summary: '1 test failed' });
+});
+
+test('notification question maps its prompt and choices', () => {
+  const options = [{ label: 'Continue', description: 'Keep working' }];
+  const out = transformEvent(evt('Notification', { question: 'Continue?', options }));
+  assert.equal(out.question, 'Continue?');
+  assert.deepEqual(out.question_options, options);
 });

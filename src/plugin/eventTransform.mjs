@@ -15,10 +15,17 @@ export function transformEvent(event) {
   const payload = event.payload || {};
   const result = {
     hook_event_name: event.type,
-    session_id: `flavor-${process.ppid || process.pid}`,
+    session_id: typeof payload.sessionId === 'string'
+      ? payload.sessionId
+      : `flavor-${process.ppid || process.pid}`,
     _source: 'flavor-code',
     _ppid: process.ppid || process.pid,
   };
+  if (typeof payload.protocolVersion === 'number') result.protocol_version = payload.protocolVersion;
+  if (typeof payload.eventId === 'string') result.event_id = payload.eventId;
+  if (typeof payload.sequence === 'number') result.event_sequence = payload.sequence;
+  if (typeof payload.timestamp === 'string') result.event_timestamp = payload.timestamp;
+  if (typeof payload.toolCallId === 'string') result.tool_use_id = payload.toolCallId;
   if (typeof payload.tool === 'string') result.tool_name = payload.tool;
   if (typeof payload.agent === 'string') result.agent_type = payload.agent;
   if (payload.input && typeof payload.input === 'object' && !Array.isArray(payload.input)) {
@@ -27,9 +34,15 @@ export function transformEvent(event) {
       if (typeof value === 'string' && !(key in result)) result[key] = value;
     }
   }
-  if (typeof payload.reason === 'string') result.message = payload.reason;
+  if (typeof payload.reason === 'string') {
+    result.message = payload.reason;
+    result.approval_reason = payload.reason;
+  }
+  if (typeof payload.toolCategory === 'string') result.tool_category = payload.toolCategory;
+  if (typeof payload.allowAlways === 'boolean') result.allow_always = payload.allowAlways;
   if (typeof payload.message === 'string' && !result.message) result.message = payload.message;
-  if (typeof payload.id === 'string') result.agent_id = payload.id;
+  if (typeof payload.taskId === 'string') result.agent_id = payload.taskId;
+  else if (typeof payload.id === 'string') result.agent_id = payload.id;
   if (typeof payload.description === 'string' && !result.message) result.message = payload.description;
   if (typeof payload.modelId === 'string') result.model = payload.modelId;
   if (typeof payload.iteration === 'number') result.message = `iteration ${payload.iteration}`;
@@ -40,6 +53,25 @@ export function transformEvent(event) {
   if (typeof payload.workspace === 'string') result.cwd = payload.workspace;
   if (typeof payload.prompt === 'string') result.prompt = payload.prompt;
   if (typeof payload.outcome === 'string') result.stop_reason = payload.outcome;
+  if (typeof payload.kind === 'string') result.notification_kind = payload.kind;
+  if (typeof payload.question === 'string') result.question = payload.question;
+  if (Array.isArray(payload.options)) result.question_options = payload.options;
+
+  // Task snapshots are already bounded, JSON-safe view state produced by
+  // flavor-code. Keep the nested shape intact so the island can render both
+  // TaskPlan/Todo items and the subagent graph without losing dependencies.
+  if (payload.taskSnapshot && typeof payload.taskSnapshot === 'object') {
+    result.task_snapshot = payload.taskSnapshot;
+  }
+
+  if (event.type === 'LoopEnd') {
+    if (typeof payload.loopId === 'string') result.loop_id = payload.loopId;
+    if (typeof payload.outcome === 'string') result.loop_outcome = payload.outcome;
+    if (typeof payload.reason === 'string') result.loop_reason = payload.reason;
+    if (payload.verification && typeof payload.verification === 'object') {
+      result.loop_verification = payload.verification;
+    }
+  }
 
   // PostToolUse carries the tool result ({ tool, input, agent, output }). The
   // output can be a huge stream, so normalize it to a truncated string — the

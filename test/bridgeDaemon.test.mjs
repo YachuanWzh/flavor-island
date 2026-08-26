@@ -151,6 +151,25 @@ test('daemon carries AskUserQuestion answers back in updatedInput', async () => 
   }
 });
 
+test('daemon carries a notification question answer back in updatedInput', async () => {
+  const island = await fakeIsland(JSON.stringify({ answer: 'Continue' }));
+  try {
+    const child = startDaemon(island.pipe);
+    const getOut = collectOutput(child);
+    child.stdin.end(requestLine(8, {
+      type: 'Notification', payload: { question: 'Extend budget?', options: ['Continue', 'Stop'] },
+    }, true));
+    await new Promise((r) => child.on('close', r));
+    const parsed = JSON.parse(getOut());
+    assert.deepEqual(parsed.decision, {
+      decision: 'allow',
+      updatedInput: { question: 'Extend budget?', options: ['Continue', 'Stop'], answer: 'Continue' },
+    });
+  } finally {
+    await island.close();
+  }
+});
+
 test('daemon returns an ask decision when the island pipe is unreachable', async () => {
   const child = startDaemon(makePipe()); // nothing listening
   const getOut = collectOutput(child);

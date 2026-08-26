@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-0.4.0-6f42c1" />
+  <img alt="version" src="https://img.shields.io/badge/version-0.5.1-6f42c1" />
   <img alt="license" src="https://img.shields.io/badge/license-MIT-brightgreen" />
   <img alt="platform" src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS-0078d4" />
   <img alt="electron" src="https://img.shields.io/badge/Electron-42.7.0-47848f" />
@@ -30,10 +30,12 @@
 Flavor Island lives at the top of your screen as an always-on-top pill that mirrors your flavor-code session:
 
 - 🟢 **Real-time status** — thinking (blinking dots) / running a tool (tool-category color) / awaiting approval (amber pulse) / awaiting an answer
-- 🔐 **Permission approval** — Allow / Allow all / Deny tool permission requests right from the island
+- 🔐 **Safe approval** — shows the host-provided reason and category; allows once/deny, with session authorization only for host-approved cacheable categories
 - ❓ **Question answering** — renders AskUserQuestion cards (single-choice / multi-choice / text / custom input); custom input is submitted as a checkbox + single-line text combo
+- 📋 **Tasks and verification** — live TaskPlan / Todo / subagent progress plus `/go` outcomes and verification evidence
 - 💬 **Session overview** — multiple sessions sorted, with the active session pinned on top
-- 🖱️ **Drag to move** — drag it anywhere; double-click to reset to top-center
+- 🖱️ **Intentional controls** — click to expand/collapse, drag anywhere without accidental toggles, and double-click to reset to top-center
+- 🌿 **Efficient motion** — lower idle frame rate, pause while hidden, and honor the OS reduced-motion setting
 - 🪟 **Click-through** — the transparent area around the island doesn't block the desktop
 - 🔊 **Sound alerts** — optional 8-bit style notification sounds
 
@@ -43,28 +45,29 @@ Flavor Island ships with a bundled flavor-code plugin (`src/plugin/`) and auto-i
 
 ```
 ~/.flavor-code/plugins/flavor-island/
-  ├── flavor-plugin.json   plugin manifest (declares 12 hooks)
+  ├── flavor-plugin.json   plugin manifest (declares 18 hooks)
   ├── activate.mjs         hook registration: event forwarding + approval blocking relay
-  └── bridge.mjs           cross-platform transport: Win named pipe / macOS Unix socket
+  ├── bridgeRelay.mjs      persistent child-process relay used by the plugin
+  └── bridgeDaemon.mjs     cross-platform transport: Win named pipe / macOS Unix socket
 ```
 
 The plugin:
 
 1. Captures the full lifecycle through flavor-code's hook system — `SessionStart` / `UserPromptSubmit` / `PreToolUse` / `PostToolUse` / `PermissionRequest` / `Stop` and more.
-2. Forwards events via `bridge.mjs` to the endpoint the island listens on:
+2. Forwards events through the persistent `bridgeRelay.mjs` / `bridgeDaemon.mjs` pair to the endpoint the island listens on:
    - **Windows**: named pipe `\\.\pipe\codeisland-<user>` (overridable with `CODEISLAND_PIPE`)
    - **macOS**: Unix socket `/tmp/codeisland-<uid>.sock` (overridable with `CODEISLAND_SOCKET_PATH`, following CodeIsland's original convention)
-3. Blocks on `PermissionRequest` and waits for the island's decision (allow / allow-all / deny); falls back to `ask` when the island is unreachable, returning approval to the terminal without blocking flavor-code.
+3. Blocks on `PermissionRequest` and waits for the island's decision (allow / allow-all / deny); flavor-code decides whether session authorization is safe for the category, and the island never keeps a second permission cache. It falls back to `ask` when unreachable, returning approval to the terminal without blocking flavor-code.
 4. `AskUserQuestion` is relayed the same way through `PermissionRequest`: the island pops up a selection panel (pick an option / custom input, then confirm to submit) and the answer is written back through the decision's `updatedInput`; if the island doesn't respond, flavor-code automatically falls back to asking in the terminal — either end covers the other.
 
-The global plugin directory applies to every project — **no `flavor init` or per-project configuration needed**. If a project also has the built-in `codeisland` plugin installed via `flavor init`, the island automatically deduplicates repeated permission requests, so both plugins can safely coexist.
+The global plugin directory applies to every project — **no `flavor init` or per-project configuration needed**. If an older project still has the built-in `codeisland` plugin, protocol v2 merges duplicate relays by stable `eventId` without mistaking a later identical operation for a replay.
 
 ## 🔌 How it works
 
 ```
 flavor-code (CLI)
   → flavor-island plugin (~/.flavor-code/plugins, auto-installed when the island starts)
-    → bridge.mjs
+    → bridgeRelay.mjs → bridgeDaemon.mjs
       → Windows: \\.\pipe\codeisland-<user>
       → macOS:   /tmp/codeisland-<uid>.sock
         → Flavor Island (Electron)
@@ -119,7 +122,7 @@ scripts/      diagnostic & end-to-end verification scripts
 
 - [CodeIsland](https://github.com/wxtsky/CodeIsland) — macOS notch Dynamic Island, MIT
 - [CodeIslandWin](https://github.com/wxtsky/CodeIslandWin) — Windows port, MIT
-- [flavor-code](https://github.com/wxtsky/flavor-code) — coding agent that provides the plugin system and hook bus
+- [flavor-code](https://github.com/YachuanWzh/flavor-code) — coding agent that provides the plugin system and hook bus
 
 ## 📄 License
 

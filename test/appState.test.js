@@ -56,7 +56,7 @@ test('allowAll decision passes through', async () => {
   assert.equal(await decision, 'allowAll');
 });
 
-test('allowAll auto-approves later same-tool calls without a card', async () => {
+test('allowAll is delegated to flavor-code instead of creating a local auto-approval rule', async () => {
   const state = createAppState();
   const first = state.requestPermission(evt('PermissionRequest', {
     toolName: 'Bash', toolInput: { command: 'npm test' },
@@ -64,56 +64,32 @@ test('allowAll auto-approves later same-tool calls without a card', async () => 
   state.resolvePermission(state.listPending()[0].key, 'allowAll');
   assert.equal(await first, 'allowAll');
 
-  // A different same-tool call arrives later: no card, immediate allow.
+  // If flavor-code sends another request, it needs a new decision. The host
+  // normally suppresses this event after safely persisting the category.
   const second = state.requestPermission(evt('PermissionRequest', {
     toolName: 'Bash', toolInput: { command: 'git status' },
   }));
-  assert.equal(state.listPending().length, 0);
+  assert.equal(state.listPending().length, 1);
+  state.resolvePermission(state.listPending()[0].key, 'allow');
   assert.equal(await second, 'allow');
 });
 
-test('allowAll rule is scoped to the tool and the session', async () => {
+test('permission card exposes host safety metadata and reason', async () => {
   const state = createAppState();
-  const first = state.requestPermission(evt('PermissionRequest', {
-    toolName: 'Bash', toolInput: { command: 'npm test' },
+  const decision = state.requestPermission(evt('PermissionRequest', {
+    toolName: 'Shell',
+    rawJSON: {
+      approval_reason: 'Writes outside the workspace',
+      tool_category: 'shell',
+      allow_always: false,
+    },
   }));
-  state.resolvePermission(state.listPending()[0].key, 'allowAll');
-  await first;
-
-  // Another tool still prompts.
-  const other = state.requestPermission(evt('PermissionRequest', {
-    toolName: 'Edit', toolInput: { path: 'a.txt' },
-  }));
-  assert.equal(state.listPending().length, 1);
-  state.resolvePermission(state.listPending()[0].key, 'deny');
-  assert.equal(await other, 'deny');
-
-  // Another session still prompts for the same tool.
-  const foreign = state.requestPermission(evt('PermissionRequest', {
-    sessionId: 's2', toolName: 'Bash', toolInput: { command: 'npm test' },
-  }));
-  assert.equal(state.listPending().length, 1);
-  state.resolvePermission(state.listPending()[0].key, 'allow');
-  assert.equal(await foreign, 'allow');
-});
-
-test('SessionEnd clears the allowAll rule for that session', async () => {
-  const state = createAppState();
-  const first = state.requestPermission(evt('PermissionRequest', {
-    toolName: 'Bash', toolInput: { command: 'npm test' },
-  }));
-  state.resolvePermission(state.listPending()[0].key, 'allowAll');
-  await first;
-
-  state.handleEvent(evt('SessionEnd'));
-
-  // Same session id restarts: the rule is gone, the card returns.
-  const again = state.requestPermission(evt('PermissionRequest', {
-    toolName: 'Bash', toolInput: { command: 'npm test' },
-  }));
-  assert.equal(state.listPending().length, 1);
-  state.resolvePermission(state.listPending()[0].key, 'allow');
-  assert.equal(await again, 'allow');
+  const card = state.listPending()[0];
+  assert.equal(card.reason, 'Writes outside the workspace');
+  assert.equal(card.toolCategory, 'shell');
+  assert.equal(card.allowAlways, false);
+  state.resolvePermission(card.key, 'deny');
+  await decision;
 });
 
 test('requestAskUserQuestion resolves with allow+answers', async () => {
@@ -177,9 +153,9 @@ test('skipAskUserQuestion denies', async () => {
 test('duplicate AskUserQuestion relays share one pending card', async () => {
   const state = createAppState();
   const toolInput = { questions: [{ question: 'Q1', options: ['a', 'b'] }] };
-  const first = state.requestAskUserQuestion(evt('PermissionRequest', { toolName: 'AskUserQuestion', toolInput }));
+  const first = state.requestAskUserQuestion(evt('PermissionRequest', { eventId: 'ask-1', toolName: 'AskUserQuestion', toolInput }));
   // A second plugin tier relays the identical hook event while the card waits.
-  const second = state.requestAskUserQuestion(evt('PermissionRequest', { toolName: 'AskUserQuestion', toolInput }));
+  const second = state.requestAskUserQuestion(evt('PermissionRequest', { eventId: 'ask-1', toolName: 'AskUserQuestion', toolInput }));
   assert.equal(state.listPending().length, 1);
 
   state.resolveAskUserQuestion(state.listPending()[0].key, { Q1: 'b' });
@@ -191,12 +167,12 @@ test('duplicate AskUserQuestion relays share one pending card', async () => {
 test('late AskUserQuestion relay replays the resolved response', async () => {
   const state = createAppState();
   const toolInput = { questions: [{ question: 'Q1', options: ['a', 'b'] }] };
-  const first = state.requestAskUserQuestion(evt('PermissionRequest', { toolName: 'AskUserQuestion', toolInput }));
+  const first = state.requestAskUserQuestion(evt('PermissionRequest', { eventId: 'ask-1', toolName: 'AskUserQuestion', toolInput }));
   state.resolveAskUserQuestion(state.listPending()[0].key, { Q1: 'a' });
   await first;
 
   // The second tier's relay runs sequentially, after the first resolved.
-  const replay = await state.requestAskUserQuestion(evt('PermissionRequest', { toolName: 'AskUserQuestion', toolInput }));
+  const replay = await state.requestAskUserQuestion(evt('PermissionRequest', { eventId: 'ask-1', toolName: 'AskUserQuestion', toolInput }));
   assert.equal(replay.hookSpecificOutput.decision.behavior, 'allow');
   assert.equal(replay.hookSpecificOutput.decision.updatedInput.answers.Q1, 'a');
   assert.equal(state.listPending().length, 0);
@@ -205,11 +181,11 @@ test('late AskUserQuestion relay replays the resolved response', async () => {
 test('late AskUserQuestion relay replays a skip as deny', async () => {
   const state = createAppState();
   const toolInput = { questions: [{ question: 'Q1', options: ['a', 'b'] }] };
-  const first = state.requestAskUserQuestion(evt('PermissionRequest', { toolName: 'AskUserQuestion', toolInput }));
+  const first = state.requestAskUserQuestion(evt('PermissionRequest', { eventId: 'ask-2', toolName: 'AskUserQuestion', toolInput }));
   state.skipAskUserQuestion(state.listPending()[0].key);
   await first;
 
-  const replay = await state.requestAskUserQuestion(evt('PermissionRequest', { toolName: 'AskUserQuestion', toolInput }));
+  const replay = await state.requestAskUserQuestion(evt('PermissionRequest', { eventId: 'ask-2', toolName: 'AskUserQuestion', toolInput }));
   assert.equal(replay.hookSpecificOutput.decision.behavior, 'deny');
   assert.equal(state.listPending().length, 0);
 });
@@ -244,6 +220,7 @@ test('duplicate PermissionRequest while pending shares the same card', async () 
   // relay the same hook event -> one card, both callers get the same decision.
   const state = createAppState();
   const make = () => evt('PermissionRequest', {
+    eventId: 'permission-1',
     toolName: 'Bash',
     toolInput: { command: 'npm test' },
     toolDescription: 'npm test',
@@ -257,11 +234,27 @@ test('duplicate PermissionRequest while pending shares the same card', async () 
   assert.equal(await second, 'allow');
 });
 
+test('legacy identical requests are not replayed after resolution', async () => {
+  const state = createAppState();
+  const make = () => evt('PermissionRequest', {
+    toolName: 'Bash', toolInput: { command: 'npm test' }, toolDescription: 'npm test',
+  });
+  const first = state.requestPermission(make());
+  state.resolvePermission(state.listPending()[0].key, 'allow');
+  await first;
+
+  const second = state.requestPermission(make());
+  assert.equal(state.listPending().length, 1);
+  state.resolvePermission(state.listPending()[0].key, 'deny');
+  assert.equal(await second, 'deny');
+});
+
 test('back-to-back duplicate PermissionRequest replays the last decision', async () => {
   // The second plugin's relay runs sequentially and arrives after the user has
   // already decided the first — it must not spawn a fresh card.
   const state = createAppState();
   const make = () => evt('PermissionRequest', {
+    eventId: 'permission-2',
     toolName: 'Bash',
     toolInput: { command: 'npm test' },
     toolDescription: 'npm test',
@@ -402,6 +395,22 @@ test('rapid tool relay never strobes: successor waits out its own reveal', () =>
   assert.equal(s.status, Status.processing);
   // Both calls are recorded even though neither flickered on the pill.
   assert.deepEqual(s.history.map((h) => h.tool), ['Bash', 'Read']);
+});
+
+test('parallel tool completion only clears its matching display activity', () => {
+  const { state, clock } = createStateWithClock();
+  const s = state.snapshot().sessions.s1;
+  state.handleEvent(evt('PreToolUse', {
+    toolUseId: 'read-1', toolName: 'Read', toolDescription: 'a.js',
+  }));
+  state.handleEvent(evt('PreToolUse', {
+    toolUseId: 'grep-1', toolName: 'Grep', toolDescription: 'needle',
+  }));
+
+  state.handleEvent(evt('PostToolUse', { toolUseId: 'read-1', toolName: 'Read' }));
+  clock.advance(300);
+  assert.equal(s.currentTool, 'Grep');
+  assert.equal(s.toolDescription, 'needle');
 });
 
 test('queued tool reveals only after the held chip drops', () => {

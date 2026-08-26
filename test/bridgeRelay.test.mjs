@@ -41,6 +41,7 @@ function makeRelay() {
 
 const EVENT = { type: 'PreToolUse', payload: { tool: 'Read' } };
 const PERM = { type: 'PermissionRequest', payload: { tool: 'Bash', agent: 'main' } };
+const QUESTION = { type: 'Notification', payload: { question: 'Continue?' } };
 
 function emitLine(child, line) {
   child.stdout.emit('data', Buffer.from(line));
@@ -85,6 +86,18 @@ test('blocking request resolves with the daemon decision', async () => {
   emitLine(child, responseFrame(child, { ok: true, decision: { decision: 'allow' } }));
   const decision = await promise;
   assert.deepEqual(decision, { decision: 'allow' });
+});
+
+test('notification questions are blocking while ordinary notifications are not', async () => {
+  const { relay, calls } = makeRelay();
+  const promise = relay.relay(QUESTION, new AbortController().signal);
+  const child = calls[0].child;
+  assert.equal(JSON.parse(child.stdin.writes[0]).wait, true);
+  emitLine(child, responseFrame(child, { ok: true, decision: { decision: 'allow', updatedInput: { question: 'Continue?', answer: 'Yes' } } }));
+  assert.deepEqual(await promise, { decision: 'allow', updatedInput: { question: 'Continue?', answer: 'Yes' } });
+
+  await relay.relay({ type: 'Notification', payload: { message: 'heads up' } }, new AbortController().signal);
+  assert.equal(JSON.parse(child.stdin.writes.at(-1)).wait, false);
 });
 
 test('blocking request resolves ask when the daemon dies first', async () => {

@@ -152,12 +152,7 @@ async function startServer() {
     pipe: pipePath(process.env),
     onEvent: (event) => appState.handleEvent(event),
     onPermission: (event) => appState.requestPermission(event),
-    onQuestion: (event) => {
-      // Plain notification-style questions (no AskUserQuestion tool). No
-      // interactive UI for these yet; acknowledge so the agent isn't blocked.
-      appState.handleEvent(event);
-      return null;
-    },
+    onQuestion: (event) => appState.requestQuestion(event),
     // AskUserQuestion: interactive select/type. Blocks until the user answers in
     // the island; resolves with the full PermissionRequest allow+answers object.
     onAskUserQuestion: (event) => appState.requestAskUserQuestion(event),

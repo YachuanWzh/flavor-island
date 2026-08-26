@@ -46,3 +46,11 @@ test('remote host id prefixes session id', () => {
   const ev = parseHookEvent(Buffer.from('{"hook_event_name":"Stop","session_id":"abc","_remote_host_id":"host1"}'));
   assert.equal(ev.sessionId, 'remote:host1:abc');
 });
+
+test('parses protocol event and tool-call identities', () => {
+  const ev = parseHookEvent(Buffer.from(JSON.stringify({
+    hook_event_name: 'PreToolUse', session_id: 's1', event_id: 'e1', tool_use_id: 't1',
+  })));
+  assert.equal(ev.eventId, 'e1');
+  assert.equal(ev.toolUseId, 't1');
+});

@@ -25,6 +25,7 @@ test('pending session expands the island', () => {
     sessions: { s1: session(Status.waitingApproval, { cwd: 'C:\\proj', currentTool: 'Bash' }) },
   });
   assert.equal(m.collapsed, false);
+  assert.equal(m.requiresAttention, true);
   assert.equal(m.count, 1);
   assert.equal(m.rows[0].title, 'proj');
   assert.equal(m.rows[0].pending, true);
@@ -140,4 +141,37 @@ test('history is limited to the most recent 10 entries', () => {
 test('history is an empty array when the session has none', () => {
   const m = renderModel({ sessions: { s1: session(Status.idle) } });
   assert.deepEqual(m.rows[0].history, []);
+});
+
+test('active task snapshot expands with ordinal and live task list', () => {
+  const taskSnapshot = {
+    plan: { tasks: [
+      { id: 't1', subject: 'Inspect', activeForm: 'Inspecting', status: 'completed', dependencies: [] },
+      { id: 't2', subject: 'Cache layer', activeForm: 'Implementing cache layer', status: 'in_progress', dependencies: ['t1'] },
+      { id: 't3', subject: 'Verify', activeForm: 'Verifying', status: 'pending', dependencies: ['t2'] },
+    ] },
+    subagents: { states: {} },
+  };
+  const m = renderModel({ sessions: { s1: session(Status.processing, { taskSnapshot }) } });
+  assert.equal(m.collapsed, false);
+  assert.equal(m.rows[0].taskProgress.summary, 'task 2/3 · Implementing cache layer');
+  assert.deepEqual(m.rows[0].taskProgress.tasks.map((task) => task.status), ['completed', 'in_progress', 'pending']);
+});
+
+test('subagent graph becomes a task list when no foreground plan exists', () => {
+  const taskSnapshot = {
+    subagents: {
+      graph: { nodes: [{ id: 'a', description: 'Review API', dependencies: [] }, { id: 'b', description: 'Run tests', dependencies: ['a'] }] },
+      states: { a: 'completed', b: 'running' },
+    },
+  };
+  const m = renderModel({ sessions: { s1: session(Status.running, { taskSnapshot }) } });
+  assert.equal(m.rows[0].taskProgress.summary, 'task 2/2 · Run tests');
+});
+
+test('loop terminal result keeps the island expanded for verification evidence', () => {
+  const loopOutcome = { outcome: 'failed', reason: 'tests failed', verification: { passed: false, summary: '1 test failed' } };
+  const m = renderModel({ sessions: { s1: session(Status.idle, { loopOutcome }) } });
+  assert.equal(m.collapsed, false);
+  assert.deepEqual(m.rows[0].loopOutcome, loopOutcome);
 });

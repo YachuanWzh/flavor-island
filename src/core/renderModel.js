@@ -78,6 +78,51 @@ function titleFor(id, session) {
   return basename(session.cwd) || (typeof id === 'string' ? id.slice(0, 8) : 'session');
 }
 
+function taskProgress(snapshot) {
+  if (!snapshot || typeof snapshot !== 'object') return null;
+  const planTasks = Array.isArray(snapshot.plan?.tasks) ? snapshot.plan.tasks : [];
+  const graphNodes = Array.isArray(snapshot.subagents?.graph?.nodes) ? snapshot.subagents.graph.nodes : [];
+  const states = snapshot.subagents?.states && typeof snapshot.subagents.states === 'object'
+    ? snapshot.subagents.states : {};
+  const seen = new Set();
+  const tasks = [];
+  for (const task of planTasks) {
+    if (!task || typeof task !== 'object' || typeof task.id !== 'string') continue;
+    seen.add(task.id);
+    tasks.push({
+      id: task.id,
+      label: task.subject || task.activeForm || task.id,
+      activeForm: task.activeForm || task.subject || task.id,
+      status: task.status || states[task.id] || 'pending',
+      dependencies: Array.isArray(task.dependencies) ? task.dependencies : [],
+    });
+  }
+  for (const node of graphNodes) {
+    if (!node || typeof node !== 'object' || typeof node.id !== 'string' || seen.has(node.id)) continue;
+    tasks.push({
+      id: node.id,
+      label: node.description || node.id,
+      activeForm: node.description || node.id,
+      status: states[node.id] || 'pending',
+      dependencies: Array.isArray(node.dependencies) ? node.dependencies : [],
+    });
+  }
+  if (!tasks.length) return null;
+  const activeIndex = tasks.findIndex((task) => task.status === 'in_progress' || task.status === 'running');
+  const completed = tasks.filter((task) => task.status === 'completed').length;
+  const ordinal = activeIndex >= 0 ? activeIndex + 1 : completed;
+  const active = activeIndex >= 0 ? tasks[activeIndex] : null;
+  return {
+    summary: active
+      ? `task ${ordinal}/${tasks.length} · ${active.activeForm}`
+      : `${completed}/${tasks.length} tasks complete`,
+    tasks,
+    completed,
+    total: tasks.length,
+    active: !!active,
+  };
+}
+
 function renderModel(state = {}) {
   const sessions = state.sessions || {};
   const entries = Object.entries(sessions);
@@ -109,6 +154,8 @@ function renderModel(state = {}) {
       // Compact timeline: newest first, capped at 10 entries so a long session
       // doesn't blow up the detail panel.
       history: (session.history || []).slice(-10),
+      taskProgress: taskProgress(session.taskSnapshot),
+      loopOutcome: session.loopOutcome || null,
     }))
     .sort((a, b) => {
       const pa = STATUS_PRIORITY[a.statusKey] ?? 1;
@@ -125,9 +172,12 @@ function renderModel(state = {}) {
   const hasPending = rows.some(
     (r) => r.statusKey === 'waitingApproval' || r.statusKey === 'waitingQuestion'
   );
+  const hasProgress = rows.some((r) => r.taskProgress?.active || r.loopOutcome);
 
   return {
-    collapsed: !hasPending,
+    collapsed: !(hasPending || hasProgress),
+    requiresAttention: hasPending,
+    suggestsExpanded: hasPending || hasProgress,
     count: rows.length,
     rows,
     // Quiet mode collapses the panel until a decision is pending, but the

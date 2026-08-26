@@ -140,6 +140,9 @@ let lastRowSet = '';
 // The most recent state push, kept so a detail toggle can re-render the panel
 // without waiting for the next push from main.
 let lastRenderState = null;
+// null follows the view-model suggestion; true/false is the user's manual
+// panel preference. A blocking approval/question always wins and expands.
+let manualPanelOpen = null;
 // One shared timer refreshes the "Running Xm Ys" line while a detail is open —
 // state pushes alone are too sparse to make the duration tick.
 let durationTimer = null;
@@ -246,6 +249,98 @@ function buildAskCard(div, pend) {
   div.appendChild(actions);
 }
 
+function buildPlainQuestionCard(div, pend) {
+  const question = document.createElement('div');
+  question.className = 'question';
+  const text = document.createElement('div');
+  text.className = 'q-text';
+  text.textContent = pend.question || 'Continue?';
+  question.appendChild(text);
+  const options = (Array.isArray(pend.options) ? pend.options : []).filter((option) => {
+    const label = typeof option === 'string' ? option : option?.label;
+    return typeof label === 'string' && !!label;
+  });
+  if (options.length) {
+    const list = document.createElement('div');
+    list.className = 'q-options';
+    for (const option of options) {
+      const label = typeof option === 'string' ? option : option?.label;
+      const row = optionRow(label, typeof option === 'object' ? option.description : null, false, false);
+      row.tabIndex = 0;
+      const submit = () => window.flavorIsland.answer(pend.key, { answer: label });
+      row.onclick = submit;
+      row.onkeydown = (event) => {
+        if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); submit(); }
+      };
+      list.appendChild(row);
+    }
+    question.appendChild(list);
+  } else {
+    const input = document.createElement('input');
+    input.className = 'q-input';
+    input.placeholder = '输入回答';
+    const actions = document.createElement('div');
+    actions.className = 'actions';
+    const submit = document.createElement('button');
+    submit.className = 'btn btn-submit';
+    submit.textContent = '回答';
+    submit.disabled = true;
+    input.oninput = () => { submit.disabled = !input.value.trim(); };
+    submit.onclick = () => {
+      if (input.value.trim()) window.flavorIsland.answer(pend.key, { answer: input.value.trim() });
+    };
+    input.onkeydown = (event) => {
+      if (event.key === 'Enter' && !submit.disabled) submit.click();
+    };
+    question.appendChild(input);
+    actions.appendChild(submit);
+    question.appendChild(actions);
+  }
+  div.appendChild(question);
+}
+
+function appendTaskBoard(div, progress) {
+  if (!progress) return;
+  const board = document.createElement('div');
+  board.className = 'task-board';
+  const head = document.createElement('div');
+  head.className = 'task-board-head';
+  head.textContent = progress.summary;
+  board.appendChild(head);
+  for (const task of progress.tasks) {
+    const line = document.createElement('div');
+    line.className = `task-line task-${task.status}`;
+    const mark = document.createElement('span');
+    mark.className = 'task-mark';
+    mark.textContent = task.status === 'completed' ? '✓'
+      : task.status === 'failed' ? '×'
+        : task.status === 'blocked' || task.status === 'cancelled' ? '·'
+          : task.status === 'in_progress' || task.status === 'running' ? '›' : '·';
+    const label = document.createElement('span');
+    label.className = 'task-label';
+    label.textContent = (task.status === 'in_progress' || task.status === 'running')
+      ? task.activeForm : task.label;
+    line.append(mark, label);
+    board.appendChild(line);
+  }
+  div.appendChild(board);
+}
+
+function appendLoopOutcome(div, loop) {
+  if (!loop) return;
+  const passed = loop.outcome === 'succeeded' || loop.verification?.passed === true;
+  const card = document.createElement('div');
+  card.className = `loop-card ${passed ? 'loop-pass' : 'loop-fail'}`;
+  const title = document.createElement('div');
+  title.className = 'loop-title';
+  title.textContent = `${passed ? '✓' : '×'} Loop ${passed ? 'verified' : loop.outcome}`;
+  const reason = document.createElement('div');
+  reason.className = 'loop-reason';
+  reason.textContent = loop.verification?.summary || loop.reason || 'Loop finished.';
+  card.append(title, reason);
+  div.appendChild(card);
+}
+
 function optionRow(label, description, multi, selected) {
   const row = document.createElement('div');
   row.className = `opt${multi ? ' opt-multi' : ''}${selected ? ' selected' : ''}`;
@@ -337,7 +432,11 @@ function render({ model, pending, sounds }) {
   (sounds || []).forEach(playSound);
 
   // Pill
-  islandEl.classList.toggle('collapsed', model.collapsed);
+  const panelOpen = model.requiresAttention || (manualPanelOpen === null
+    ? !model.collapsed
+    : manualPanelOpen);
+  islandEl.classList.toggle('collapsed', !panelOpen);
+  pillEl.setAttribute('aria-expanded', String(panelOpen));
   pillEl.className = `pill state-${model.mascotState}`;
   mascot.setState(model.mascotState);
   // Session-count badge: always visible once any session exists (collapsed or
@@ -380,7 +479,7 @@ function render({ model, pending, sounds }) {
   // Panel rows. Rebuilding the DOM replays every row's entry animation, which
   // flashes on the transparent window — suppress it while the row set (ids +
   // statuses) is unchanged, so only genuinely new layouts animate in.
-  const panelSig = `${model.collapsed ? 'c' : 'e'}|${model.rows.map((r) => `${r.id}:${r.statusKey}`).join(',')}`;
+  const panelSig = `${panelOpen ? 'e' : 'c'}|${model.rows.map((r) => `${r.id}:${r.statusKey}`).join(',')}`;
   panelEl.classList.toggle('settled', panelEl.dataset.sig === panelSig);
   panelEl.dataset.sig = panelSig;
   // When the row set changes (session added/removed), a previously opened
@@ -409,11 +508,11 @@ function render({ model, pending, sounds }) {
     if (stagger) div.style.animationDelay = `${Math.min(i, 6) * 30}ms`;
     // While a tool runs, the status chip shows the tool in its category color
     // instead of the plain status text.
-    const statusText = row.tool || row.statusLabel;
+    const statusText = row.tool || row.taskProgress?.summary || row.statusLabel;
     const statusClass = row.tool ? `row-status tk-${row.toolKey || 'tool'}` : 'row-status';
     // The ask card renders the question text itself — the row description
     // would just duplicate the first question above the card.
-    const showDesc = row.toolDescription && !(pend && pend.kind === 'askUserQuestion');
+    const showDesc = row.toolDescription && !(pend && (pend.kind === 'askUserQuestion' || pend.kind === 'question'));
     const isOpen = row.id === openDetailId;
     div.classList.toggle('open', isOpen);
     div.innerHTML = `
@@ -435,32 +534,57 @@ function render({ model, pending, sounds }) {
       rerender();
     });
     if (isOpen && row.startTime) ensureDurationTimer();
+    appendTaskBoard(div, row.taskProgress);
+    appendLoopOutcome(div, row.loopOutcome);
     if (pend && pend.kind === 'permission') {
+      if (pend.reason || pend.toolCategory) {
+        const context = document.createElement('div');
+        context.className = 'approval-context';
+        if (pend.toolCategory) {
+          const category = document.createElement('span');
+          category.className = `approval-category tk-${pend.toolCategory}`;
+          category.textContent = pend.toolCategory;
+          context.appendChild(category);
+        }
+        if (pend.reason) {
+          const reason = document.createElement('span');
+          reason.className = 'approval-reason';
+          reason.textContent = pend.reason;
+          context.appendChild(reason);
+        }
+        div.appendChild(context);
+      }
       const actions = document.createElement('div');
       actions.className = 'actions';
       const allow = document.createElement('button');
       allow.className = 'btn btn-allow';
-      allow.textContent = 'Allow';
+      allow.textContent = 'Allow once';
       allow.onclick = () => window.flavorIsland.decide(pend.key, 'allow');
-      // "Allow all" approves this call and persists a session rule so every later
-      // call to the same tool is auto-approved without re-prompting.
-      const allowAll = document.createElement('button');
-      allowAll.className = 'btn btn-allow-all';
-      allowAll.textContent = 'Allow all';
-      allowAll.title = pend.toolName
-        ? `Always allow ${pend.toolName} for this session`
-        : 'Always allow this tool for this session';
-      allowAll.onclick = () => window.flavorIsland.decide(pend.key, 'allowAll');
+      // The host may additionally offer a category-scoped session grant.
       const deny = document.createElement('button');
       deny.className = 'btn btn-deny';
       deny.textContent = 'Deny';
       deny.onclick = () => window.flavorIsland.decide(pend.key, 'deny');
-      actions.append(allow, allowAll, deny);
+      actions.append(allow, deny);
+      // Only flavor-code may declare a request cacheable. Destructive and
+      // collaboration-sharing approvals never expose this broader action.
+      if (pend.allowAlways) {
+        const allowAll = document.createElement('button');
+        allowAll.className = 'btn btn-allow-all';
+        allowAll.textContent = 'Allow for session';
+        allowAll.title = pend.toolCategory
+          ? `Allow the ${pend.toolCategory} category for this flavor-code session`
+          : 'Allow this category for the current flavor-code session';
+        allowAll.onclick = () => window.flavorIsland.decide(pend.key, 'allowAll');
+        actions.appendChild(allowAll);
+      }
       div.appendChild(actions);
     } else if (pend && pend.kind === 'askUserQuestion' && pend.questions) {
       // Selection changes patch the card in place (see buildAskCard) instead of
       // re-rendering, so clicking options doesn't flash the panel.
       buildAskCard(div, pend);
+    } else if (pend && pend.kind === 'question') {
+      buildPlainQuestionCard(div, pend);
     }
     panelEl.appendChild(div);
   });
@@ -501,10 +625,17 @@ function rerender() {
 // window.screenX/Y is the window's current top-left in screen coordinates, and
 // the cursor's screenX/Y delta from mousedown tells us how far to move it.
 let dragStart = null; // { mouseX, mouseY, winX, winY }
+let suppressPillClick = false;
+
+function togglePanel() {
+  const currentlyOpen = !islandEl.classList.contains('collapsed');
+  manualPanelOpen = !currentlyOpen;
+  rerender();
+}
 
 pillEl.addEventListener('mousedown', (e) => {
   if (e.button !== 0) return; // left button only
-  dragStart = { mouseX: e.screenX, mouseY: e.screenY, winX: window.screenX, winY: window.screenY };
+  dragStart = { mouseX: e.screenX, mouseY: e.screenY, winX: window.screenX, winY: window.screenY, moved: false };
   e.preventDefault();
 });
 
@@ -513,12 +644,28 @@ window.addEventListener('mousemove', (e) => {
   // If the button was released off-window (a fast drag can outrun the window and
   // miss the mouseup), stop dragging instead of sticking to the cursor.
   if ((e.buttons & 1) === 0) { dragStart = null; return; }
+  if (Math.abs(e.screenX - dragStart.mouseX) + Math.abs(e.screenY - dragStart.mouseY) > 4) {
+    dragStart.moved = true;
+  }
   const x = dragStart.winX + (e.screenX - dragStart.mouseX);
   const y = dragStart.winY + (e.screenY - dragStart.mouseY);
   window.flavorIsland.moveWindow(x, y);
 });
 
-window.addEventListener('mouseup', () => { dragStart = null; });
+window.addEventListener('mouseup', () => {
+  suppressPillClick = !!dragStart?.moved;
+  dragStart = null;
+});
+
+pillEl.addEventListener('click', () => {
+  if (suppressPillClick) { suppressPillClick = false; return; }
+  togglePanel();
+});
+pillEl.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  e.preventDefault();
+  togglePanel();
+});
 
 // Click-through: the transparent window swallows clicks on every pixel, so the
 // area around the visible pill/panel would block whatever is underneath. Hit-test

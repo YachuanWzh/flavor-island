@@ -27,6 +27,7 @@ function newSession() {
     // The tool actually executing, independent of what the island displays
     // (the display layer debounces currentTool; history must not).
     activeTool: null,
+    activeActivities: {},
     lastUserPrompt: null,
     lastAssistantMessage: null,
     lastToolOutput: null,
@@ -34,6 +35,8 @@ function newSession() {
     failureCount: 0,
     lastModelError: null,
     interrupted: false,
+    taskSnapshot: null,
+    loopOutcome: null,
     history: [],
     recentMessages: [],
     startTime: Date.now(),
@@ -72,6 +75,39 @@ function recordTool(session, tool, description, success) {
   if (session.history.length > MAX_HISTORY) session.history.shift();
 }
 
+function activityKey(event, prefix) {
+  return event.toolUseId || event.agentId || event.eventId || `${prefix}:legacy`;
+}
+
+function latestActivity(session) {
+  return Object.values(session.activeActivities || {}).at(-1) || null;
+}
+
+function startActivity(session, key, activity) {
+  session.activeActivities[key] = activity;
+  session.activeTool = activity;
+}
+
+function finishActivity(session, event, prefix, success) {
+  const activities = session.activeActivities || {};
+  let key = activityKey(event, prefix);
+  let activity = activities[key];
+  if (!activity && event.toolName) {
+    const matching = Object.entries(activities).filter(([, item]) => item.tool === event.toolName).at(-1);
+    if (matching) [key, activity] = matching;
+  }
+  if (!activity) {
+    const latest = Object.entries(activities).at(-1);
+    if (latest) [key, activity] = latest;
+  }
+  if (activity) {
+    recordTool(session, activity.tool, activity.description, success);
+    delete activities[key];
+  }
+  session.activeTool = latestActivity(session);
+  return session.activeTool;
+}
+
 function applyMetadata(session, raw) {
   if (typeof raw._source === 'string' && raw._source) session.source = raw._source;
   if (typeof raw.cwd === 'string' && raw.cwd) session.cwd = raw.cwd;
@@ -107,6 +143,7 @@ function reduceEvent(sessions, event) {
       break;
     case 'UserPromptSubmit': {
       session.interrupted = false;
+      session.loopOutcome = null;
       session.status = Status.processing;
       session.currentTool = null;
       session.toolDescription = null;
@@ -121,7 +158,10 @@ function reduceEvent(sessions, event) {
     case 'PreToolUse':
       // Track the real execution regardless of display suppression so the
       // PostToolUse record below always knows which tool just finished.
-      session.activeTool = { tool: event.toolName, description: event.toolDescription };
+      startActivity(session, activityKey(event, 'tool'), {
+        tool: event.toolName,
+        description: event.toolDescription,
+      });
       if (!isWaiting) {
         session.status = Status.running;
         session.currentTool = event.toolName;
@@ -133,27 +173,28 @@ function reduceEvent(sessions, event) {
       // a successful call also clears any previous failure's error.
       session.lastToolOutput = typeof raw.tool_output === 'string' ? raw.tool_output : null;
       session.lastToolError = null;
-      if (session.activeTool) recordTool(session, session.activeTool.tool, session.activeTool.description, true);
-      session.activeTool = null;
+      finishActivity(session, event, 'tool', true);
       if (!isWaiting) {
-        session.status = Status.processing;
-        session.currentTool = null;
-        session.toolDescription = null;
+        session.status = session.activeTool ? Status.running : Status.processing;
+        session.currentTool = session.activeTool?.tool || null;
+        session.toolDescription = session.activeTool?.description || null;
       }
       break;
     case 'PostToolUseFailure':
       session.lastToolError = raw.tool_error || null;
       session.failureCount += 1;
-      if (session.activeTool) recordTool(session, session.activeTool.tool, session.activeTool.description, false);
-      session.activeTool = null;
+      finishActivity(session, event, 'tool', false);
       if (!isWaiting) {
-        session.status = Status.processing;
-        session.currentTool = null;
-        session.toolDescription = null;
+        session.status = session.activeTool ? Status.running : Status.processing;
+        session.currentTool = session.activeTool?.tool || null;
+        session.toolDescription = session.activeTool?.description || null;
       }
       break;
     case 'SubagentStart':
-      session.activeTool = { tool: 'Agent', description: typeof raw.agent_type === 'string' ? raw.agent_type : null };
+      startActivity(session, activityKey(event, 'agent'), {
+        tool: 'Agent',
+        description: typeof raw.agent_type === 'string' ? raw.agent_type : null,
+      });
       if (!isWaiting) {
         session.status = Status.running;
         session.currentTool = 'Agent';
@@ -161,12 +202,11 @@ function reduceEvent(sessions, event) {
       }
       break;
     case 'SubagentStop':
-      if (session.activeTool) recordTool(session, session.activeTool.tool, session.activeTool.description, true);
-      session.activeTool = null;
+      finishActivity(session, event, 'agent', true);
       if (!isWaiting) {
-        session.status = Status.processing;
-        session.currentTool = null;
-        session.toolDescription = null;
+        session.status = session.activeTool ? Status.running : Status.processing;
+        session.currentTool = session.activeTool?.tool || null;
+        session.toolDescription = session.activeTool?.description || null;
       }
       break;
     case 'Stop': {
@@ -179,6 +219,8 @@ function reduceEvent(sessions, event) {
       session.toolDescription = null;
       // An interrupted tool never sends its Post event — abandon it unrecorded.
       session.activeTool = null;
+      session.activeActivities = {};
+      session.taskSnapshot = null;
       const msg = firstStringFromEvent(event, ['last_assistant_message', 'text', 'message', 'summary']);
       if (msg) {
         session.lastAssistantMessage = msg;
@@ -190,8 +232,29 @@ function reduceEvent(sessions, event) {
       break;
     }
     case 'Notification': {
+      if (raw.notification_kind === 'task_snapshot'
+        && raw.task_snapshot && typeof raw.task_snapshot === 'object') {
+        session.taskSnapshot = raw.task_snapshot;
+      }
       const text = firstStringFromEvent(event, ['message', 'text', 'summary', 'status', 'detail']);
       if (text) session.toolDescription = text;
+      break;
+    }
+    case 'LoopEnd': {
+      // flavor-code also uses LoopEnd for the evolve telemetry service. Only
+      // /go terminal events carry the loop_outcome contract rendered here.
+      if (typeof raw.loop_outcome !== 'string') break;
+      const verification = raw.loop_verification && typeof raw.loop_verification === 'object'
+        ? raw.loop_verification : null;
+      session.loopOutcome = {
+        loopId: typeof raw.loop_id === 'string' ? raw.loop_id : null,
+        outcome: typeof raw.loop_outcome === 'string' ? raw.loop_outcome : 'unknown',
+        reason: typeof raw.loop_reason === 'string' ? raw.loop_reason : null,
+        verification,
+      };
+      session.status = Status.idle;
+      session.currentTool = null;
+      session.toolDescription = null;
       break;
     }
     case 'BeforeModelCall': {

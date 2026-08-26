@@ -362,7 +362,67 @@ html, body {
 .hist-time { flex-shrink: 0; font-size: 9.5px; color: var(--ash); }
 .detail-empty { color: var(--ash); font-style: italic; }
 
-.actions { display: flex; gap: 6px; margin-top: 8px; }
+/* Live task ticket: a compact kitchen-order rail that fits the island's
+   cooking metaphor while keeping the established pixel/mono vocabulary. */
+.task-board {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 5px;
+  padding: 7px 8px;
+  background: var(--bg-inset);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.task-board-head {
+  font-family: var(--font-display);
+  font-size: 9px;
+  letter-spacing: 0.35px;
+  color: var(--ember);
+  margin-bottom: 2px;
+}
+.task-line { display: flex; align-items: baseline; gap: 7px; min-width: 0; font-size: 10.5px; color: var(--ash); }
+.task-mark { width: 10px; flex-shrink: 0; text-align: center; }
+.task-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-completed .task-mark { color: var(--mint); }
+.task-failed .task-mark { color: var(--danger); }
+.task-in_progress, .task-running { color: var(--fg); }
+.task-in_progress .task-mark, .task-running .task-mark { color: var(--ember); animation: task-cursor 0.9s steps(2) infinite; }
+@keyframes task-cursor { 50% { opacity: 0.25; } }
+
+.loop-card {
+  margin-top: 5px;
+  padding: 8px 9px;
+  border-radius: 10px;
+  background: var(--bg-inset);
+  border: 1px solid var(--line);
+}
+.loop-title { font-family: var(--font-display); font-size: 9px; letter-spacing: 0.5px; }
+.loop-reason { margin-top: 4px; color: var(--ash); font-size: 10.5px; line-height: 1.4; white-space: pre-wrap; }
+.loop-pass { border-color: rgba(76,217,100,0.38); }
+.loop-pass .loop-title { color: var(--mint); }
+.loop-fail { border-color: rgba(255,102,102,0.38); }
+.loop-fail .loop-title { color: var(--danger); }
+
+.approval-context {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin-top: 8px;
+  padding: 7px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-inset);
+}
+.approval-category {
+  flex: 0 0 auto;
+  font-family: var(--font-display);
+  font-size: 8px;
+  line-height: 1.6;
+  text-transform: uppercase;
+}
+.approval-reason { color: var(--ash); font-size: 10px; line-height: 1.45; white-space: pre-wrap; }
+.actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 8px; }
 .btn {
   flex: 1;
   font-family: var(--font);
@@ -389,6 +449,7 @@ html, body {
 /* "Allow all" is a softer, outlined green to read as a broader, stickier choice
    than the plain one-shot Allow. */
 .btn-allow-all {
+  grid-column: 1 / -1;
   background: transparent;
   color: var(--mint);
   border: 1px solid var(--mint);
@@ -568,6 +629,8 @@ html, body {
   .pill.state-waiting,
   .pill-dots i,
   .row,
-  .opt.selected .opt-mark { animation: none !important; }
+  .opt.selected .opt-mark,
+  .task-in_progress .task-mark,
+  .task-running .task-mark { animation: none !important; }
   * { transition-duration: 0.01ms !important; }
 }

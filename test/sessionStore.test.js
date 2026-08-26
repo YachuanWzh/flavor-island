@@ -59,6 +59,22 @@ test('PreToolUse sets running + currentTool; PostToolUse records and returns to 
   assert.equal(s.history[0].success, true);
 });
 
+test('parallel tools remain running until each matching call finishes', () => {
+  const sessions = {};
+  reduceEvent(sessions, evt('PreToolUse', { toolUseId: 'read-1', toolName: 'Read', toolDescription: 'a.js' }));
+  reduceEvent(sessions, evt('PreToolUse', { toolUseId: 'grep-1', toolName: 'Grep', toolDescription: 'needle' }));
+
+  reduceEvent(sessions, evt('PostToolUse', { toolUseId: 'read-1', toolName: 'Read' }));
+  assert.equal(sessions.s1.status, Status.running);
+  assert.equal(sessions.s1.currentTool, 'Grep');
+  assert.equal(sessions.s1.history.at(-1).tool, 'Read');
+
+  reduceEvent(sessions, evt('PostToolUse', { toolUseId: 'grep-1', toolName: 'Grep' }));
+  assert.equal(sessions.s1.status, Status.processing);
+  assert.equal(sessions.s1.currentTool, null);
+  assert.deepEqual(sessions.s1.history.map((item) => item.tool), ['Read', 'Grep']);
+});
+
 test('PostToolUseFailure records failure', () => {
   const sessions = {};
   reduceEvent(sessions, evt('PreToolUse', { toolName: 'Edit' }));
@@ -235,4 +251,37 @@ test('waitingApproval suppresses BeforeModelCall/BeforePlan status changes', () 
   reduceEvent(sessions, evt('BeforePlan'));
   assert.equal(sessions.s1.status, Status.waitingApproval);
   assert.equal(sessions.s1.toolDescription, 'npm test');
+});
+
+test('task snapshot notifications are stored and Stop clears them', () => {
+  const sessions = {};
+  const snapshot = { plan: { tasks: [{ id: 't1', status: 'in_progress' }] }, subagents: { states: {} } };
+  reduceEvent(sessions, evt('Notification', {
+    rawJSON: { notification_kind: 'task_snapshot', task_snapshot: snapshot },
+  }));
+  assert.deepEqual(sessions.s1.taskSnapshot, snapshot);
+  reduceEvent(sessions, evt('Stop'));
+  assert.equal(sessions.s1.taskSnapshot, null);
+});
+
+test('LoopEnd stores verification outcome and a new prompt clears it', () => {
+  const sessions = {};
+  reduceEvent(sessions, evt('LoopEnd', {
+    rawJSON: {
+      loop_id: 'loop-1', loop_outcome: 'failed', loop_reason: 'tests failed',
+      loop_verification: { passed: false, summary: '1 test failed' },
+    },
+  }));
+  assert.deepEqual(sessions.s1.loopOutcome, {
+    loopId: 'loop-1', outcome: 'failed', reason: 'tests failed',
+    verification: { passed: false, summary: '1 test failed' },
+  });
+  reduceEvent(sessions, evt('UserPromptSubmit', { rawJSON: { prompt: 'try again' } }));
+  assert.equal(sessions.s1.loopOutcome, null);
+});
+
+test('evolve telemetry LoopEnd does not create a /go result card', () => {
+  const sessions = {};
+  reduceEvent(sessions, evt('LoopEnd', { rawJSON: { status: 'completed', iterations: 2 } }));
+  assert.equal(sessions.s1.loopOutcome, null);
 });

@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-0.4.0-6f42c1" />
+  <img alt="version" src="https://img.shields.io/badge/version-0.5.1-6f42c1" />
   <img alt="license" src="https://img.shields.io/badge/license-MIT-brightgreen" />
   <img alt="platform" src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS-0078d4" />
   <img alt="electron" src="https://img.shields.io/badge/Electron-42.7.0-47848f" />
@@ -31,10 +31,12 @@
 Flavor Island 住在屏幕顶部，以一个置顶的小药丸（pill）形式展示 flavor-code 会话状态：
 
 - 🟢 **实时状态追踪** — 思考中（闪烁思考点）/ 运行工具（工具类别色）/ 等待审批（琥珀脉冲）/ 等待回答
-- 🔐 **权限审批** — 直接在浮岛上 Allow / Allow all / Deny 工具权限请求
+- 🔐 **安全审批** — 显示宿主判定的原因与工具类别；支持一次允许 / 拒绝，并只对可缓存类别显示“本会话允许”
 - ❓ **问题回答** — 渲染 AskUserQuestion 卡片（单选 / 多选 / 文本 / 自定义输入），自定义输入以复选框 + 单行文本的形式一并提交
+- 📋 **任务与验证** — 实时展示 TaskPlan / Todo / 子 Agent 进度，以及 `/go` 的终态和验证证据
 - 💬 **会话概览** — 多个会话排序展示，正在工作的会话置顶
-- 🖱️ **拖拽移动** — 拖到任意位置，双击复位到顶部居中
+- 🖱️ **合理操控** — 单击展开/收起、拖到任意位置、双击复位到顶部居中，拖动不会误触展开
+- 🌿 **节能动效** — 空闲降低刷新率、窗口隐藏暂停，并遵循系统“减少动态效果”设置
 - 🪟 **点击穿透** — 浮岛周围的透明区域不遮挡桌面
 - 🔊 **音效提示** — 可选的 8-bit 风格提示音
 
@@ -45,34 +47,36 @@ Flavor Island **自带配套的 flavor-code 插件**（`src/plugin/`），并在
 
 ```
 ~/.flavor-code/plugins/flavor-island/
-  ├── flavor-plugin.json   插件清单（声明 12 个 hook）
+  ├── flavor-plugin.json   插件清单（声明 18 个 hook）
   ├── activate.mjs         hook 注册：事件转发 + 审批阻塞 relay
-  └── bridge.mjs           跨平台传输：Win 命名管道 / macOS Unix socket
+  ├── bridgeRelay.mjs      插件复用的常驻子进程 relay
+  └── bridgeDaemon.mjs     跨平台传输：Win 命名管道 / macOS Unix socket
 ```
 
 该插件：
 
 1. 通过 flavor-code 的 hook 系统捕获 `SessionStart` / `UserPromptSubmit` /
    `PreToolUse` / `PostToolUse` / `PermissionRequest` / `Stop` 等全部生命周期事件；
-2. 通过 `bridge.mjs` 把事件转发到浮岛监听的 endpoint：
+2. 通过常驻的 `bridgeRelay.mjs` / `bridgeDaemon.mjs` 把事件转发到浮岛监听的 endpoint：
    - **Windows**：命名管道 `\\.\pipe\codeisland-<user>`（可用 `CODEISLAND_PIPE` 覆盖）
    - **macOS**：Unix socket `/tmp/codeisland-<uid>.sock`（可用 `CODEISLAND_SOCKET_PATH` 覆盖，沿用 CodeIsland 原约定）
 3. 对 `PermissionRequest` 阻塞等待浮岛的决策并回写（allow / allow-all / deny）；
+   会话级授权是否可用由 flavor-code 根据类别和操作风险决定，浮岛不会自行缓存权限；
    浮岛不可达时回退 `ask`，退回终端审批，不会阻塞 flavor-code。
 4. `AskUserQuestion` 同样经由 `PermissionRequest` 中继：浮岛弹出选择面板
    （点选选项 / 自定义输入，确认后提交），答案通过决策的 `updatedInput`
    写回；浮岛未应答时 flavor-code 自动退回终端提问，两端互为兜底。
 
 全局插件目录对所有项目生效，**无需在每个项目里 `flavor init` 或做任何配置**。
-若项目里同时存在 `flavor init` 安装的内置 `codeisland` 插件，浮岛会自动对
-重复的权限请求去重，两个插件可以安全共存。
+若旧项目里仍残留内置 `codeisland` 插件，协议 v2 会按稳定 `eventId` 精确合并
+同一 hook 的重复 relay，不会把下一次内容相同的真实操作当作重复请求。
 
 ## 🔌 工作原理
 
 ```
 flavor-code (CLI)
   → flavor-island 插件（~/.flavor-code/plugins，启动浮岛时自动安装）
-    → bridge.mjs
+    → bridgeRelay.mjs → bridgeDaemon.mjs
       → Windows: \\.\pipe\codeisland-<user>
       → macOS:   /tmp/codeisland-<uid>.sock
         → Flavor Island (Electron)
@@ -127,7 +131,7 @@ scripts/      诊断与端到端验证脚本
 
 - [CodeIsland](https://github.com/wxtsky/CodeIsland) — macOS 刘海灵动岛，MIT
 - [CodeIslandWin](https://github.com/wxtsky/CodeIslandWin) — Windows 移植版，MIT
-- [flavor-code](https://github.com/wxtsky/flavor-code) — coding agent，提供插件系统与 hook 总线
+- [flavor-code](https://github.com/YachuanWzh/flavor-code) — coding agent，提供插件系统与 hook 总线
 
 ## 📄 License
 

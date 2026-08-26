@@ -1,10 +1,12 @@
-# P1 Backlog (needs flavor-code changes)
+# P1 Backlog (completed in flavor-code 1.3.5 / flavor-island 0.5.0)
 
 Recorded from the P0/P1 triage on 2026-08-26. These require coordinated
 changes in the flavor-code repo (external), so they are tracked here for a
 later session. All three touch the hook payload contract between
 `flavor-code/src/...` and `flavor-island/src/plugin/eventTransform.mjs` +
 `flavor-island/src/core/sessionStore.js`.
+
+Implemented on 2026-08-26. The sections below are retained as acceptance notes.
 
 ## P1-1: Command confirmations on the island (/commit, /review, …)
 
