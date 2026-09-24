@@ -185,16 +185,20 @@ function createWindow() {
     alwaysOnTop: true,
     hasShadow: false,
     fullscreenable: false,
-    // macOS: a normal (even borderless + transparent + screen-saver-level)
-    // window is still constrained by the system to `visibleFrame` — its top
-    // edge can't reach the physical top of the display, so the notch-fusion
-    // probe in positionWindow() would always detect a clamp and fall back to
-    // `notchFlush: 'below'` (bar hugs the notch's bottom edge with a visible
-    // gap instead of covering it). Declaring the window as a panel lifts it
-    // into the panel layer, which sits above the menu bar and *can* be
-    // positioned at the physical screen top — this is what makes true notch
-    // fusion possible on macOS, mirroring CodeIsland's NSPanel usage.
-    ...(process.platform === 'darwin' ? { type: 'panel' } : {}),
+    // macOS: two things are needed before the window can actually sit on the
+    // physical top of the display (over the menu bar / notch):
+    //  1. `type: 'panel'` lifts it into the panel layer (above the menu bar's
+    //     own window level) — without this, even `alwaysOnTop: 'screen-saver'`
+    //     still leaves the window below the menu bar in z-order.
+    //  2. `enableLargerThanScreen: true` is what actually disables AppKit's
+    //     `constrainFrameRect:toScreen:` clamp. Without it, macOS silently
+    //     pushes any `setBounds({ y: 0 })` back down to `visibleFrame`'s top
+    //     (the menu bar's bottom edge) — confirmed on a real 14" MBP: the
+    //     probe logged `requestedY: 0, appliedY: 33` even with `type: 'panel'`
+    //     alone, which kept tripping the `notchFlush: 'below'` fallback.
+    // Together these let the black bar cover the notch instead of hugging its
+    // bottom edge, mirroring CodeIsland's NSPanel + full-screen-frame usage.
+    ...(process.platform === 'darwin' ? { type: 'panel', enableLargerThanScreen: true } : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
