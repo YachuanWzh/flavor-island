@@ -54,11 +54,13 @@ function computeNotchMetrics({ isMac, bounds, workArea }) {
 // Window bounds that fuse the island with the notch: the window is centered on
 // the *physical* display and its top edge sits at the very top (y = bounds.y),
 // so the black bar covers the notch instead of hanging below the work area.
-function computeNotchWindowBounds(height, { bounds, notchWidth, wingWidth }) {
-  const width = notchWidth + wingWidth * 2;
-  const x = Math.round(bounds.x + (bounds.width - width) / 2);
+// `width` is content-driven (CodeIsland sizes the bar to notchW + wings when
+// collapsed and widens to ~580 when expanded), clamped to the screen.
+function computeNotchWindowBounds(height, { bounds, width }) {
+  const w = Math.round(Math.min(Math.max(1, width), bounds.width));
+  const x = Math.round(bounds.x + (bounds.width - w) / 2);
   const y = bounds.y;
-  return { x, y, width, height: Math.max(1, Math.min(height, bounds.height)) };
+  return { x, y, width: w, height: Math.max(1, Math.min(height, bounds.height)) };
 }
 
 module.exports = { clampWindowHeight, computeWindowBounds, computeNotchMetrics, computeNotchWindowBounds };

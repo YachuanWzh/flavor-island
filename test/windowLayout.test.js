@@ -78,13 +78,24 @@ test('computeNotchMetrics is always off on Windows', () => {
   assert.equal(m.notchHeight, 0);
 });
 
+// CodeIsland sizes the bar to its content: collapsed width is
+// notchW + 2*wing, expanded widens to max(nw+200, 580) capped by the screen.
+// The window follows whatever width the renderer measured.
 test('notch window bounds pin the window to the physical screen top', () => {
   const b = computeNotchWindowBounds(56, {
     bounds: { x: 0, y: 0, width: 1512, height: 982 },
-    notchWidth: 212,
-    wingWidth: 90,
+    width: 212 + 2 * 60,
   });
   assert.equal(b.y, 0); // top of the physical display, behind the notch
-  assert.equal(b.width, 212 + 90 * 2);
-  assert.equal(b.x, Math.round((1512 - (212 + 90 * 2)) / 2));
+  assert.equal(b.width, 332);
+  assert.equal(b.x, Math.round((1512 - 332) / 2));
+});
+
+test('notch window bounds clamp an oversized width to the screen', () => {
+  const b = computeNotchWindowBounds(400, {
+    bounds: { x: 0, y: 0, width: 800, height: 600 },
+    width: 900,
+  });
+  assert.equal(b.width, 800);
+  assert.equal(b.x, 0);
 });

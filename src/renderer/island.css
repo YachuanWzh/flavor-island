@@ -29,27 +29,32 @@ body.notch .pill {
   padding: 0 12px;
   justify-content: flex-start;
 }
-/* Left shoulder: black outside a 3px circle centered on the bar's top-left corner. */
+/* Shoulders: the black flare outside each top corner — the region ABOVE the
+   arc (toward the bar's top edge) is black, the region below it transparent.
+   For the left tab that is everything outside a circle of radius --notch-ext
+   centered at the tab's bottom-left corner; mirror for the right. */
 body.notch .pill::before,
 body.notch .pill::after {
   content: '';
   position: absolute;
   top: 0;
-  width: 3px;
-  height: 3px;
+  width: var(--notch-ext, 3px);
+  height: var(--notch-ext, 3px);
   pointer-events: none;
 }
 body.notch .pill::before {
-  left: -3px;
-  background: radial-gradient(circle at 100% 0, transparent 0 3px, #000 3px);
+  left: calc(-1 * var(--notch-ext, 3px));
+  background: radial-gradient(circle var(--notch-ext, 3px) at 0 100%, transparent calc(var(--notch-ext, 3px) - 0.5px), #000 var(--notch-ext, 3px));
 }
-/* Right shoulder: mirror of the left. */
 body.notch .pill::after {
-  right: -3px;
-  background: radial-gradient(circle at 0 0, transparent 0 3px, #000 3px);
+  right: calc(-1 * var(--notch-ext, 3px));
+  background: radial-gradient(circle var(--notch-ext, 3px) at 100% 100%, transparent calc(var(--notch-ext, 3px) - 0.5px), #000 var(--notch-ext, 3px));
 }
-/* The gap that keeps wing content clear of the physical camera cutout. */
+/* The gap that keeps wing content clear of the physical camera cutout.
+   Must be block-level — an inline span ignores `width` inside a flex row's
+   baseline flow (the gap was collapsing and the wings never split). */
 body.notch .notch-gap {
+  display: block;
   flex-shrink: 0;
   width: max(0px, calc(var(--notch-w, 0px) - 24px));
 }
@@ -58,6 +63,20 @@ body:not(.notch) .notch-gap { display: none; }
    the OS-drag region covers the whole bar. */
 body.notch .pill { cursor: grab; }
 body:not(.notch) .pill { cursor: pointer; }
+/* Fallback when macOS clamps the window below the notch: the bar can no
+   longer cover the cutout, so it becomes a shorter "wings" strip whose top
+   edge hugs the notch's bottom edge — the big --notch-h black body is gone,
+   only the side wings hold content. */
+body.notch.notch-below .pill {
+  height: calc(var(--notch-h, 32px) - 16px);
+}
+body.notch.notch-below .notch-gap {
+  width: max(8px, calc(var(--notch-w, 0px) - 24px));
+}
+body.notch.notch-below .pill::before,
+body.notch.notch-below .pill::after {
+  --notch-ext: 9px;
+}
 /* Expanded panel: CodeIsland's expanded state widens the same notch shell
    (topExtension 14, bottomRadius 24) — content hangs directly off the bar, so
    the panel is full-width, flush under the bar, and only rounds its bottom. */
@@ -713,6 +732,10 @@ html, body {
   border:1px solid transparent; border-radius:6px; cursor:pointer;
 }
 .settings-btn:hover,.settings-btn:focus-visible { color:var(--ember); border-color:rgba(255,106,61,.45); outline:none; }
+/* Header button group: settings + quit pinned to the head's right edge. */
+.head-actions { display:flex; align-items:center; gap:4px; margin-left:auto; }
+/* Quit reads as destructive — red tint instead of the ember hover. */
+.quit-btn:hover,.quit-btn:focus-visible { color:#ff5c57; border-color:rgba(255,92,87,.45); outline:none; }
 .badge-private { color:var(--mint); border:1px solid rgba(76,217,100,.32); background:rgba(76,217,100,.08); }
 .deliverables { display:flex; flex-direction:column; gap:4px; min-width:0; }
 .deliverable { display:grid; grid-template-columns:46px 1fr auto; gap:6px; align-items:center; font-size:9px; }

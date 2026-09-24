@@ -77,9 +77,16 @@ let lastSetBounds = null;
 // on Windows or non-notch screens, where the plain top-center pill layout is
 // used. Refreshed whenever the display metrics change.
 let notch = { hasNotch: false, notchHeight: 0, notchWidth: 0 };
+// 'cover': the window sits on the physical screen top and its black bar
+// includes the notch area. 'below': macOS refused to lift the window over the
+// notch (it clamped the frameless window below the menu bar) — then we hug the
+// notch's bottom edge instead and the renderer shrinks the bar to wing height.
+let notchFlush = 'cover';
+// CodeIsland sizing rules: collapsed bar = notch + two content wings; the
+// expanded panel widens toward ~580 logical px, capped by the screen width.
+const NOTCH_MIN_WING = 60;
 
-
-function positionWindow(height) {
+function positionWindow(height, contentWidth = null) {
   if (!win || win.isDestroyed()) return;
   const current = win.getBounds();
   const point = userPosition || { x: current.x + Math.round(current.width / 2), y: current.y + Math.round(current.height / 2) };
@@ -96,13 +103,16 @@ function positionWindow(height) {
     // Notch mode: pin the window to the very top of the *physical* display so
     // the black bar covers the notch itself (mirrors CodeIsland's panel frame
     // at screen.frame.maxY - height). The user's drag only shifts X — Y stays
-    // fused with the notch.
-    const wingWidth = Math.max(60, Math.round((WIN_WIDTH - notch.notchWidth) / 2));
-    bounds = computeNotchWindowBounds(height, {
-      bounds: display.bounds,
-      notchWidth: notch.notchWidth,
-      wingWidth,
-    });
+    // fused with the notch. Width is content-driven (the renderer measures the
+    // bar when collapsed and the panel when expanded), floored at notch + wings.
+    // CodeIsland expanded panel: max(nw + 200, 580), capped by the screen.
+    // A wider content width from the renderer means the panel is expanded.
+    let width = notch.notchWidth + NOTCH_MIN_WING * 2;
+    if (contentWidth && contentWidth > width) {
+      width = Math.max(width, Math.min(Math.max(notch.notchWidth + 200, 580), contentWidth));
+    }
+    bounds = computeNotchWindowBounds(height, { bounds: display.bounds, width });
+    if (notchFlush === 'below') bounds.y = display.workArea.y;
     if (userPosition) {
       bounds.x = Math.round(Math.min(Math.max(userPosition.x, display.bounds.x),
         display.bounds.x + display.bounds.width - bounds.width));
@@ -122,6 +132,17 @@ function positionWindow(height) {
   if (cur.x === bounds.x && cur.y === bounds.y && cur.width === bounds.width && cur.height === bounds.height) return;
   lastSetBounds = bounds;
   win.setBounds(bounds);
+  // Clamp probe: we asked for the physical screen top but the window came back
+  // lower — this macOS/Electron combo refuses to park a borderless window over
+  // the notch. Fall back to hugging the notch's bottom edge and re-place once.
+  if (notch.hasNotch && notchFlush === 'cover' && bounds.y === display.bounds.y) {
+    const applied = win.getBounds();
+    if (applied.y !== display.bounds.y) {
+      notchFlush = 'below';
+      positionWindow(height, contentWidth);
+      return;
+    }
+  }
   // Notch geometry rides on the state push so the renderer can size the black
   // bar behind the physical notch (CSS custom properties).
   pushState();
@@ -200,7 +221,7 @@ function pushState(effects = []) {
     pending: appState.listPending(),
     sounds,
     settings,
-    notch,
+    notch: { ...notch, flush: notchFlush },
   });
 }
 
@@ -262,6 +283,20 @@ function toggleIsland() {
   if (!win || win.isDestroyed()) return;
   if (win.isVisible()) win.hide(); else { win.show(); positionWindow(win.getBounds().height); }
   buildTray();
+}
+
+// Right-click menu on the island itself. On a notch Mac the tray icon can be
+// squeezed out or hidden behind the cutout, so the island must carry its own
+// escape hatch: settings, position reset, hide, and — critically — quit.
+function showIslandContextMenu() {
+  if (!win || win.isDestroyed()) return;
+  Menu.buildFromTemplate([
+    { label: '设置…', click: openSettingsWindow },
+    { label: '重置位置', click: () => { userPosition = null; positionWindow(win.getBounds().height); } },
+    { label: '隐藏灵动岛', click: toggleIsland },
+    { type: 'separator' },
+    { label: '退出 Flavor Island', accelerator: process.platform === 'darwin' ? 'Cmd+Q' : 'Ctrl+Q', click: () => app.quit() },
+  ]).popup({ window: win });
 }
 
 function settingsPath() {
@@ -360,6 +395,9 @@ app.whenReady().then(async () => {
 
   const keepIslandVisible = () => {
     if (!win || win.isDestroyed()) return;
+    // Display topology changed (notch screen plugged/unplugged, resolution
+    // switch): re-probe whether we can cover the notch from scratch.
+    notchFlush = 'cover';
     positionWindow(win.getBounds().height);
   };
   screen.on('display-added', keepIslandVisible);
@@ -369,7 +407,13 @@ app.whenReady().then(async () => {
   setInterval(() => appState.cleanupIdle(), 30 * 1000);
 });
 
-ipcMain.on('resize', (_evt, height) => positionWindow(height));
+// The renderer measures its own layout and reports the needed size. In notch
+// mode the width matters too (bar/panel are content-sized, not the fixed
+// Windows width), so payload is { height, width }.
+ipcMain.on('resize', (_evt, payload) => {
+  if (typeof payload === 'number') positionWindow(payload);
+  else positionWindow(payload.height, payload.width);
+});
 // Renderer hit-test result: ignore mouse events (pass clicks through to whatever
 // is underneath) everywhere except over the pill/panel. forward:true so we keep
 // receiving move events to re-arm when the cursor returns to content.
@@ -391,6 +435,10 @@ ipcMain.on('reset-position', () => {
   userPosition = null;
   positionWindow(win.getBounds().height);
 });
+// Right-click anywhere on the island (bar or panel) pops the native menu with
+// the quit entry — the only escape hatch that works even when the tray icon
+// is hidden behind the notch.
+ipcMain.on('island-contextmenu', () => showIslandContextMenu());
 ipcMain.on('permission-decision', (_evt, { key, behavior }) => appState.resolvePermission(key, behavior));
 ipcMain.on('question-answer', (_evt, { key, answer }) => appState.resolveQuestion(key, answer));
 ipcMain.on('ask-answer', (_evt, { key, answers, details }) => appState.resolveAskUserQuestion(key, answers, details));

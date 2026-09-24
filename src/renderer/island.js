@@ -147,8 +147,10 @@ function ensureDurationTimer() {
 // (one entry per question): { value, set: string[], other, otherText }.
 const askDrafts = new Map();
 
-// Last height sent to main for a window resize — guards against no-op resizes.
+// Last size sent to main for a window resize — guards against no-op resizes.
+// lastResizeW stays null on the pill layout, where main owns the width.
 let lastResizeH = 0;
+let lastResizeW = null;
 
 // Expandable session details: at most one row's detail block is open, keyed by
 // row id. Main knows nothing about this state — the renderer re-applies it on
@@ -553,8 +555,12 @@ function render({ model, pending, sounds, settings = {}, notch: notchInfo = null
     document.documentElement.style.setProperty('--notch-h', `${notchInfo.notchHeight}px`);
     document.documentElement.style.setProperty('--notch-w', `${notchInfo.notchWidth}px`);
     document.body.classList.add('notch');
+    // 'below' = macOS clamped the window under the notch; the bar hugs the
+    // notch's bottom edge at wing height instead of covering the cutout.
+    document.body.classList.toggle('notch-below', notchInfo.flush === 'below');
   } else {
     document.body.classList.remove('notch');
+    document.body.classList.remove('notch-below');
   }
 
   // Pill
@@ -626,8 +632,14 @@ function render({ model, pending, sounds, settings = {}, notch: notchInfo = null
     const head = document.createElement('div');
     head.className = 'panel-head';
     head.innerHTML = `<span>${model.count} session${model.count === 1 ? '' : 's'}</span>`
-      + `<button class="settings-btn" type="button" aria-label="打开设置" title="设置">⚙</button>`;
+      + `<span class="head-actions">`
+      + `<button class="settings-btn" type="button" aria-label="打开设置" title="设置">⚙</button>`
+      // Quit lives in the header because on a notch Mac the tray icon can be
+      // squeezed behind the cutout — the island itself must be able to exit.
+      + `<button class="settings-btn quit-btn" type="button" aria-label="退出 Flavor Island" title="退出 (⌘Q)">⏻</button>`
+      + `</span>`;
     head.querySelector('.settings-btn').onclick = () => window.flavorIsland.openSettings();
+    head.querySelector('.quit-btn').onclick = () => window.flavorIsland.quit();
     panelEl.appendChild(head);
   }
   const stagger = !panelEl.classList.contains('settled');
@@ -745,23 +757,36 @@ function render({ model, pending, sounds, settings = {}, notch: notchInfo = null
   // scrollHeight is the full, uncapped content height regardless of how tall the
   // panel's own (flex/clamped) box is, so this can't feed back on the window size.
   requestAnimationFrame(() => {
-    const pillH = Math.ceil(pillEl.getBoundingClientRect().height);
+    const pillRect = pillEl.getBoundingClientRect();
     const notchMode = document.body.classList.contains('notch');
-    // Notch mode zeroes the island padding (the bar must touch the screen top
-    // edge), so the padding compensation only applies to the pill layout.
-    let h = pillH + (notchMode ? 0 : 8 /* island top+bottom padding */) + 4 /* buffer */;
-    if (!islandEl.classList.contains('collapsed')) {
-      h += 6 /* gap above panel */ + panelEl.scrollHeight;
+    const expanded = !islandEl.classList.contains('collapsed');
+    let h;
+    let w = null;
+    if (notchMode) {
+      // Notch mode zeroes the island padding (the bar must touch the screen top
+      // edge) and has no drop shadow to reserve room for. Width is content-
+      // driven like CodeIsland's panelWidth: collapsed = the bar's natural
+      // width (notch gap + wings), expanded = the panel's content width.
+      h = Math.ceil(pillRect.height) + 4 /* buffer */;
+      if (expanded) h += panelEl.scrollHeight;
+      const contentW = expanded
+        ? Math.ceil(Math.max(panelEl.scrollWidth, panelEl.getBoundingClientRect().width))
+        : Math.ceil(pillRect.width);
+      w = contentW + 8 /* shoulder tabs stick out 3px each side */;
+    } else {
+      h = Math.ceil(pillRect.height) + 8 /* island top+bottom padding */ + 4 /* buffer */;
+      if (expanded) h += 6 /* gap above panel */ + panelEl.scrollHeight;
+      // body{overflow:hidden} clips any drop shadow reaching past the window
+      // edge — that hard line is the "weird" bottom shadow. Reserve room for it.
+      // The pad is transparent and click-through, so it costs nothing.
+      h += SHADOW_PAD;
     }
-    // body{overflow:hidden} clips any drop shadow reaching past the window edge —
-    // that hard line is the "weird" bottom shadow. Reserve room for it. The pad is
-    // transparent and click-through, so it costs nothing in occlusion.
-    h += SHADOW_PAD;
     // Skip no-op resizes: re-applying identical bounds still forces a window
     // redraw, which shows up as a flicker on the transparent window.
-    if (h === lastResizeH) return;
+    if (h === lastResizeH && w === lastResizeW) return;
     lastResizeH = h;
-    window.flavorIsland.resize(h);
+    lastResizeW = w;
+    window.flavorIsland.resize(h, w);
   });
 }
 
@@ -842,5 +867,26 @@ window.addEventListener('mousemove', (e) => updateMousePassthrough(e.clientX, e.
 
 // Double-click the pill to bring a dragged island back to its top-center home.
 pillEl.addEventListener('dblclick', () => window.flavorIsland.resetPosition());
+
+// Right-click anywhere on the island pops the native menu (settings / reset /
+// quit). On a notch Mac the tray icon can hide behind the cutout, so the bar
+// and panel must carry their own exit affordance in every state.
+for (const el of [pillEl, panelEl]) {
+  el.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    window.flavorIsland.showContextMenu();
+  });
+}
+
+// ⌘Q (Ctrl+Q off macOS) quits while the island window holds focus — the only
+// keyboard path, since a screen-saver-level overlay never installs a global
+// hotkey (that would hijack ⌘Q from every other app).
+window.addEventListener('keydown', (e) => {
+  const mod = window.flavorIsland.platform === 'darwin' ? e.metaKey : e.ctrlKey;
+  if (mod && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'q') {
+    e.preventDefault();
+    window.flavorIsland.quit();
+  }
+});
 
 window.flavorIsland.onState(render);

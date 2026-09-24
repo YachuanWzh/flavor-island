@@ -3,8 +3,10 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('flavorIsland', {
+  // The sandboxed renderer has no `process`; ⌘Q-vs-Ctrl+Q needs the platform.
+  platform: process.platform,
   onState: (cb) => ipcRenderer.on('state-update', (_e, payload) => cb(payload)),
-  resize: (height) => ipcRenderer.send('resize', height),
+  resize: (height, width = null) => ipcRenderer.send('resize', { height, width }),
   setIgnoreMouse: (ignore) => ipcRenderer.send('set-ignore-mouse', ignore),
   moveWindow: (x, y) => ipcRenderer.send('move-window', { x, y }),
   resetPosition: () => ipcRenderer.send('reset-position'),
@@ -15,4 +17,5 @@ contextBridge.exposeInMainWorld('flavorIsland', {
   control: (sessionId, command, message) => ipcRenderer.invoke('session-control', { sessionId, command, message }),
   openSettings: () => ipcRenderer.invoke('settings-open'),
   quit: () => ipcRenderer.send('quit'),
+  showContextMenu: () => ipcRenderer.send('island-contextmenu'),
 });
