@@ -4,6 +4,78 @@
    cleaner without a track running down the panel. */
 ::-webkit-scrollbar { width: 0; height: 0; display: none; }
 
+/* ── macOS notch fusion (mirrors CodeIsland's NotchPanelShape) ──────────────
+   When main detects a notch it pins the window to the very top of the physical
+   display and pushes the notch geometry as --notch-w / --notch-h. The pill
+   then becomes a pure-black bar exactly as tall as the notch, flush with the
+   screen top edge: the bar blends into the physical notch (no border, no
+   shadow, no rounded top corners), content splits into left/right "wings"
+   around a spacer the width of the notch, and the only rounding is the bottom
+   corners (CodeIsland: bottomRadius 12 when collapsed). The tiny `ext`-style
+   shoulder at each top corner replicates NotchPanelShape's topExtension
+   flare — a 3px radial-gradient tab curving from the bar's top edge into its
+   side. */
+body.notch .island { padding: 0; }
+body.notch .pill {
+  position: relative;
+  margin: 0 4px;
+  width: calc(100% - 8px);
+  max-width: none;
+  height: var(--notch-h, 32px);
+  border: none;
+  border-radius: 0 0 12px 12px;
+  background: #000;
+  box-shadow: none;
+  padding: 0 12px;
+  justify-content: flex-start;
+}
+/* Left shoulder: black outside a 3px circle centered on the bar's top-left corner. */
+body.notch .pill::before,
+body.notch .pill::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  width: 3px;
+  height: 3px;
+  pointer-events: none;
+}
+body.notch .pill::before {
+  left: -3px;
+  background: radial-gradient(circle at 100% 0, transparent 0 3px, #000 3px);
+}
+/* Right shoulder: mirror of the left. */
+body.notch .pill::after {
+  right: -3px;
+  background: radial-gradient(circle at 0 0, transparent 0 3px, #000 3px);
+}
+/* The gap that keeps wing content clear of the physical camera cutout. */
+body.notch .notch-gap {
+  flex-shrink: 0;
+  width: max(0px, calc(var(--notch-w, 0px) - 24px));
+}
+body:not(.notch) .notch-gap { display: none; }
+/* The notch bar itself stays click/drag targets even outside the pill box —
+   the OS-drag region covers the whole bar. */
+body.notch .pill { cursor: grab; }
+body:not(.notch) .pill { cursor: pointer; }
+/* Expanded panel: CodeIsland's expanded state widens the same notch shell
+   (topExtension 14, bottomRadius 24) — content hangs directly off the bar, so
+   the panel is full-width, flush under the bar, and only rounds its bottom. */
+body.notch .panel {
+  width: 100%;
+  margin-top: 0;
+  border: none;
+  border-top: 1px solid var(--line);
+  border-radius: 0 0 24px 24px;
+  box-shadow: none;
+}
+/* Glows on the notch bar would break the black-into-black blend; state color
+   still reads through the status text and mascot. */
+body.notch .pill.state-running,
+body.notch .pill.state-processing,
+body.notch .pill.state-waiting { border-color: transparent; box-shadow: none; }
+body.notch .pill.state-waiting { animation: none; }
+
 :root {
   --bg: #0c0a08;
   --bg-soft: #171310;

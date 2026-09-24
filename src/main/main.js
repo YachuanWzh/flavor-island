@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const { createAppState } = require('./appState');
 const { createHookServer } = require('../server/hookServer');
 const { renderModel } = require('../core/renderModel');
-const { computeWindowBounds } = require('../core/windowLayout');
+const { computeWindowBounds, computeNotchMetrics, computeNotchWindowBounds } = require('../core/windowLayout');
 const { pipePath } = require('../core/pipePath');
 const { installPlugin } = require('./pluginInstaller');
 const { normalizeSettings, DEFAULT_SETTINGS } = require('../core/settings');
@@ -73,27 +73,58 @@ let userPosition = null;
 // The bounds we last applied programmatically, so the `moved` handler can tell
 // our own setBounds apart from a real user drag (timing-independent).
 let lastSetBounds = null;
+// macOS notch geometry for the display the island sits on. { hasNotch:false }
+// on Windows or non-notch screens, where the plain top-center pill layout is
+// used. Refreshed whenever the display metrics change.
+let notch = { hasNotch: false, notchHeight: 0, notchWidth: 0 };
+
 
 function positionWindow(height) {
   if (!win || win.isDestroyed()) return;
   const current = win.getBounds();
   const point = userPosition || { x: current.x + Math.round(current.width / 2), y: current.y + Math.round(current.height / 2) };
   const display = screen.getDisplayNearestPoint(point);
+  notch = computeNotchMetrics({
+    isMac: process.platform === 'darwin',
+    bounds: display.bounds,
+    workArea: display.workArea,
+  });
   // Never let the island grow past the bottom of the screen — clamp to the work
   // area and let the panel scroll internally for content that doesn't fit.
-  const bounds = computeWindowBounds(height, {
-    workArea: display.workArea,
-    width: WIN_WIDTH,
-    topMargin: TOP_MARGIN,
-    min: 1,
-    userPosition,
-  });
+  let bounds;
+  if (notch.hasNotch) {
+    // Notch mode: pin the window to the very top of the *physical* display so
+    // the black bar covers the notch itself (mirrors CodeIsland's panel frame
+    // at screen.frame.maxY - height). The user's drag only shifts X — Y stays
+    // fused with the notch.
+    const wingWidth = Math.max(60, Math.round((WIN_WIDTH - notch.notchWidth) / 2));
+    bounds = computeNotchWindowBounds(height, {
+      bounds: display.bounds,
+      notchWidth: notch.notchWidth,
+      wingWidth,
+    });
+    if (userPosition) {
+      bounds.x = Math.round(Math.min(Math.max(userPosition.x, display.bounds.x),
+        display.bounds.x + display.bounds.width - bounds.width));
+    }
+  } else {
+    bounds = computeWindowBounds(height, {
+      workArea: display.workArea,
+      width: WIN_WIDTH,
+      topMargin: TOP_MARGIN,
+      min: 1,
+      userPosition,
+    });
+  }
   // Skip no-op resizes: re-applying identical bounds forces a window redraw,
   // which shows up as a flicker on the transparent always-on-top window.
   const cur = win.getBounds();
   if (cur.x === bounds.x && cur.y === bounds.y && cur.width === bounds.width && cur.height === bounds.height) return;
   lastSetBounds = bounds;
   win.setBounds(bounds);
+  // Notch geometry rides on the state push so the renderer can size the black
+  // bar behind the physical notch (CSS custom properties).
+  pushState();
 }
 
 function createWindow() {
@@ -169,6 +200,7 @@ function pushState(effects = []) {
     pending: appState.listPending(),
     sounds,
     settings,
+    notch,
   });
 }
 

@@ -536,14 +536,26 @@ function appendSessionControls(div, row) {
   div.appendChild(card);
 }
 
-function render({ model, pending, sounds, settings = {} }) {
+function render({ model, pending, sounds, settings = {}, notch: notchInfo = null }) {
   // Keep the latest push so a detail toggle can re-render without a new push.
-  lastRenderState = { model, pending, sounds, settings };
+  lastRenderState = { model, pending, sounds, settings, notch: notchInfo };
   reducedMotion = settings.motion === 'reduced'
     || (settings.motion !== 'full' && SYSTEM_REDUCED_MOTION);
   document.body.classList.toggle('reduce-motion', reducedMotion);
   if (typeof mascot.setReducedMotion === 'function') mascot.setReducedMotion(reducedMotion);
   (sounds || []).forEach(playSound);
+
+  // macOS notch fusion: hand the notch geometry to CSS as custom properties
+  // and flip the body into notch mode. Mirrors CodeIsland's ScreenDetector —
+  // main already sized the window to sit behind the physical notch; the CSS
+  // lays the bar out as left wing / notch gap / right wing.
+  if (notchInfo && notchInfo.hasNotch) {
+    document.documentElement.style.setProperty('--notch-h', `${notchInfo.notchHeight}px`);
+    document.documentElement.style.setProperty('--notch-w', `${notchInfo.notchWidth}px`);
+    document.body.classList.add('notch');
+  } else {
+    document.body.classList.remove('notch');
+  }
 
   // Pill
   const panelOpen = (model.autoExpand && model.requiresAttention) || (manualPanelOpen === null
@@ -734,7 +746,10 @@ function render({ model, pending, sounds, settings = {} }) {
   // panel's own (flex/clamped) box is, so this can't feed back on the window size.
   requestAnimationFrame(() => {
     const pillH = Math.ceil(pillEl.getBoundingClientRect().height);
-    let h = pillH + 8 /* island top+bottom padding */ + 4 /* buffer */;
+    const notchMode = document.body.classList.contains('notch');
+    // Notch mode zeroes the island padding (the bar must touch the screen top
+    // edge), so the padding compensation only applies to the pill layout.
+    let h = pillH + (notchMode ? 0 : 8 /* island top+bottom padding */) + 4 /* buffer */;
     if (!islandEl.classList.contains('collapsed')) {
       h += 6 /* gap above panel */ + panelEl.scrollHeight;
     }

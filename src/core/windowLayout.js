@@ -31,4 +31,34 @@ function computeWindowBounds(requestedHeight, { workArea, width, topMargin = 0, 
   return { x, y, width, height };
 }
 
-module.exports = { clampWindowHeight, computeWindowBounds };
+// Notch geometry, mirroring CodeIsland's ScreenDetector. Electron exposes no
+// safeAreaInsets, so a notch display is detected from its top inset: on notch
+// Macs the menu bar + notch occupy ~37-38pt, while plain menu bars are ~24-25pt
+// (and 0 when the menu bar is auto-hidden). The notch width follows
+// CodeIsland's simulated-notch rule: 14% of the screen width clamped to
+// [160, 240] logical points — on real notch displays this covers the physical
+// notch (14" MBP: ~204pt) since the black bar blends into the black notch.
+const NOTCH_MIN_INSET = 30;
+function computeNotchMetrics({ isMac, bounds, workArea }) {
+  if (!isMac || !bounds || !workArea) {
+    return { hasNotch: false, notchHeight: 0, notchWidth: 0 };
+  }
+  const topInset = workArea.y - bounds.y;
+  if (topInset < NOTCH_MIN_INSET) {
+    return { hasNotch: false, notchHeight: 0, notchWidth: 0 };
+  }
+  const notchWidth = Math.round(Math.min(Math.max(bounds.width * 0.14, 160), 240));
+  return { hasNotch: true, notchHeight: Math.round(topInset), notchWidth };
+}
+
+// Window bounds that fuse the island with the notch: the window is centered on
+// the *physical* display and its top edge sits at the very top (y = bounds.y),
+// so the black bar covers the notch instead of hanging below the work area.
+function computeNotchWindowBounds(height, { bounds, notchWidth, wingWidth }) {
+  const width = notchWidth + wingWidth * 2;
+  const x = Math.round(bounds.x + (bounds.width - width) / 2);
+  const y = bounds.y;
+  return { x, y, width, height: Math.max(1, Math.min(height, bounds.height)) };
+}
+
+module.exports = { clampWindowHeight, computeWindowBounds, computeNotchMetrics, computeNotchWindowBounds };
