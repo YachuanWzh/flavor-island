@@ -68,7 +68,7 @@ test('computeNotchMetrics treats a plain menu bar as no notch', () => {
   assert.equal(m.notchWidth, 0);
 });
 
-test('computeNotchMetrics is always off on Windows', () => {
+test('computeNotchMetrics is off on Windows without a manual notch', () => {
   const m = computeNotchMetrics({
     isMac: false,
     bounds: { x: 0, y: 0, width: 2560, height: 1440 },
@@ -76,6 +76,40 @@ test('computeNotchMetrics is always off on Windows', () => {
   });
   assert.equal(m.hasNotch, false);
   assert.equal(m.notchHeight, 0);
+});
+
+test('computeNotchMetrics honors a manual notch on Windows (notch-screen fusion)', () => {
+  const m = computeNotchMetrics({
+    isMac: false,
+    bounds: { x: 0, y: 0, width: 1920, height: 1200 },
+    workArea: { x: 0, y: 0, width: 1920, height: 1160 },
+    manual: { mode: 'on', notchWidth: 180, notchHeight: 28 },
+  });
+  assert.equal(m.hasNotch, true);
+  assert.equal(m.notchWidth, 180);
+  assert.equal(m.notchHeight, 28);
+});
+
+test('computeNotchMetrics off mode disables even macOS auto-detection', () => {
+  const m = computeNotchMetrics({
+    isMac: true,
+    bounds: { x: 0, y: 0, width: 1512, height: 982 },
+    workArea: { x: 0, y: 38, width: 1512, height: 944 },
+    manual: { mode: 'off' },
+  });
+  assert.equal(m.hasNotch, false);
+  assert.equal(m.notchHeight, 0);
+});
+
+test('computeNotchMetrics auto mode falls back to macOS detection', () => {
+  const m = computeNotchMetrics({
+    isMac: true,
+    bounds: { x: 0, y: 0, width: 1512, height: 982 },
+    workArea: { x: 0, y: 38, width: 1512, height: 944 },
+    manual: { mode: 'auto' },
+  });
+  assert.equal(m.hasNotch, true);
+  assert.equal(m.notchHeight, 38);
 });
 
 // CodeIsland sizes the bar to its content: collapsed width is

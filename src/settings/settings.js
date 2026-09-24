@@ -3,6 +3,7 @@
 const ids = {
   sounds: 'sounds', autoExpand: 'auto-expand', launchAtLogin: 'launch-at-login',
   motion: 'motion', privacyMode: 'privacy-mode',
+  notchMode: 'notch-mode', notchWidth: 'notch-width', notchHeight: 'notch-height',
 };
 const priceIds = {
   inputPerMillion: 'price-input', outputPerMillion: 'price-output',
@@ -101,5 +102,123 @@ scrollArea.addEventListener('scroll', () => {
   });
 });
 
+// ---- Global rules manager: ~/.flavor-code/GLOBAL.md ---------------------
+// flavor-code injects that file verbatim into every session's prompt; rules
+// are single-line bullets. A disabled rule must live OUTSIDE the document
+// (main keeps them in GLOBAL.disabled.json), hence the sidecar-backed IPC.
+const globalRuleListEl = document.getElementById('global-rule-list');
+const globalAddInputEl = document.getElementById('global-add-input');
+const globalAddBtnEl = document.getElementById('global-add-btn');
+const globalStatusEl = document.getElementById('global-status');
+const globalPathEl = document.getElementById('global-path');
+let globalRules = [];
+let globalEditing = null; // original text of the row currently in edit mode
+
+function setGlobalStatus(text, ok = true) {
+  globalStatusEl.textContent = text;
+  globalStatusEl.classList.toggle('error', !ok);
+}
+
+async function refreshGlobal() {
+  const { rules, path } = await window.flavorSettings.global.list();
+  globalRules = rules;
+  globalPathEl.textContent = path;
+  renderGlobalRules();
+}
+
+async function globalOp(run, okText) {
+  try {
+    await run();
+    globalEditing = null;
+    await refreshGlobal();
+    setGlobalStatus(okText, true);
+  } catch (error) {
+    globalEditing = null;
+    setGlobalStatus(`操作失败：${error.message}`, false);
+    try { await refreshGlobal(); } catch { /* file unreadable; status says so */ }
+  }
+}
+
+function ruleButton(label, onClick, danger = false) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'rule-btn' + (danger ? ' danger' : '');
+  btn.textContent = label;
+  btn.addEventListener('click', onClick);
+  return btn;
+}
+
+function buildRuleRow(rule) {
+  const row = document.createElement('div');
+  row.className = 'rule-row' + (rule.enabled ? '' : ' off');
+
+  const sw = document.createElement('label');
+  sw.className = 'switch';
+  const toggle = document.createElement('input');
+  toggle.type = 'checkbox';
+  toggle.checked = rule.enabled;
+  toggle.setAttribute('aria-label', rule.enabled ? '关闭该规则' : '开启该规则');
+  toggle.addEventListener('change', () =>
+    globalOp(() => window.flavorSettings.global.toggle(rule.text, toggle.checked),
+      toggle.checked ? '已开启' : '已关闭'));
+  sw.append(toggle, document.createElement('i'));
+  row.appendChild(sw);
+
+  if (globalEditing === rule.text) {
+    const edit = document.createElement('input');
+    edit.className = 'rule-edit';
+    edit.value = rule.text;
+    const save = () => globalOp(() => window.flavorSettings.global.update(rule.text, edit.value), '已更新');
+    edit.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') save();
+      if (e.key === 'Escape') { globalEditing = null; renderGlobalRules(); }
+    });
+    row.appendChild(edit);
+    row.appendChild(ruleButton('保存', save));
+    row.appendChild(ruleButton('取消', () => { globalEditing = null; renderGlobalRules(); }));
+  } else {
+    const text = document.createElement('span');
+    text.className = 'rule-text';
+    text.textContent = rule.text;
+    row.appendChild(text);
+    row.appendChild(ruleButton('编辑', () => { globalEditing = rule.text; renderGlobalRules(); }));
+    row.appendChild(ruleButton('删除', () =>
+      globalOp(() => window.flavorSettings.global.remove(rule.text), '已删除'), true));
+  }
+  return row;
+}
+
+function renderGlobalRules() {
+  globalRuleListEl.textContent = '';
+  if (globalRules.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'global-empty';
+    empty.textContent = '暂无全局规则。添加一条后，flavor-code 的所有新会话都会带上它。';
+    globalRuleListEl.appendChild(empty);
+    return;
+  }
+  for (const rule of globalRules) globalRuleListEl.appendChild(buildRuleRow(rule));
+}
+
+function addGlobalRule() {
+  const text = globalAddInputEl.value.trim();
+  if (!text) return;
+  globalOp(async () => {
+    await window.flavorSettings.global.add(text);
+    globalAddInputEl.value = '';
+  }, '已添加');
+}
+
+globalAddBtnEl.addEventListener('click', addGlobalRule);
+globalAddInputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') addGlobalRule(); });
+
 window.flavorSettings.onState(apply);
+
+refreshGlobal().catch((error) => {
+  globalRuleListEl.textContent = '';
+  const empty = document.createElement('p');
+  empty.className = 'global-empty';
+  empty.textContent = `读取 GLOBAL.md 失败：${error.message}`;
+  globalRuleListEl.appendChild(empty);
+});
 window.flavorSettings.get().then(apply);

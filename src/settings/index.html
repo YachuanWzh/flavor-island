@@ -24,9 +24,17 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.8 2.7 8 7 10 4.3-2 7-5.2 7-10V6l-7-3Z"/><path d="m9.2 12 1.8 1.8 3.8-4"/></svg>
           <span>隐私</span>
         </button>
+        <button class="nav-item" type="button" data-target="notch">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="5" width="19" height="14" rx="2.5"/><path d="M8.5 5a3 3 0 0 0 3 3h1a3 3 0 0 0 3-3"/></svg>
+          <span>刘海融合</span>
+        </button>
         <button class="nav-item" type="button" data-target="usage">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19V11m7 8V5m7 14v-6"/><path d="M3 19h18"/></svg>
           <span>用量与费用</span>
+        </button>
+        <button class="nav-item" type="button" data-target="global">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l4 4v14H6z"/><path d="M9 10h7m-7 4h7m-7 4h4"/></svg>
+          <span>全局指令</span>
         </button>
       </nav>
 
@@ -85,6 +93,25 @@
           </div>
         </section>
 
+        <section class="settings-section" id="notch">
+          <div class="section-heading"><div><h2>刘海融合</h2><p>让灵动岛贴合屏幕顶部的物理刘海缺口，黑条与刘海融为一体。</p></div></div>
+          <div class="settings-card">
+            <label class="setting-row">
+              <span class="setting-copy"><strong>融合模式</strong><small>自动＝仅 Mac 检测；开启＝手动贴合（Windows 刘海屏选此项）；关闭＝普通胶囊</small></span>
+              <select id="notch-mode"><option value="auto">自动</option><option value="on">开启</option><option value="off">关闭</option></select>
+            </label>
+            <label class="setting-row">
+              <span class="setting-copy"><strong>刘海宽度</strong><small>物理缺口的宽度（逻辑像素 px）</small></span>
+              <input id="notch-width" type="number" min="1" max="600" step="1" inputmode="numeric" />
+            </label>
+            <label class="setting-row">
+              <span class="setting-copy"><strong>刘海高度</strong><small>物理缺口的高度（逻辑像素 px）</small></span>
+              <input id="notch-height" type="number" min="1" max="80" step="1" inputmode="numeric" />
+            </label>
+            <div class="local-note"><i>i</i><span><strong>如何取值</strong><small>可对照系统截图量取缺口尺寸；调整后灵动岛会立即重排贴合。</small></span></div>
+          </div>
+        </section>
+
         <section class="settings-section" id="usage">
           <div class="section-heading"><div><h2>用量与费用</h2><p>填入模型价格后，灵动岛会估算每轮任务费用。</p></div></div>
           <div class="settings-card pricing-card">
@@ -94,6 +121,21 @@
               <label><span>输出</span><div><b>$</b><input id="price-output" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00" /></div></label>
               <label><span>缓存读取</span><div><b>$</b><input id="price-cache-read" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00" /></div></label>
               <label><span>缓存写入</span><div><b>$</b><input id="price-cache-create" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00" /></div></label>
+            </div>
+          </div>
+        </section>
+
+        <section class="settings-section" id="global">
+          <div class="section-heading"><div><h2>全局指令</h2><p>管理 flavor-code 的全局规则文件 ~/.flavor-code/GLOBAL.md，每条规则是一个单行条目。</p></div></div>
+          <div class="settings-card global-card">
+            <div class="global-rule-list" id="global-rule-list"><p class="global-empty">加载中…</p></div>
+            <div class="global-add">
+              <input id="global-add-input" type="text" placeholder="新增一条全局规则（单行文本）" />
+              <button id="global-add-btn" type="button">添加</button>
+            </div>
+            <div class="global-footer">
+              <small id="global-status" class="global-status" aria-live="polite"></small>
+              <small id="global-path" class="global-path"></small>
             </div>
           </div>
         </section>

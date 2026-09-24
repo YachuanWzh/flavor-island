@@ -11,6 +11,8 @@ const { pipePath } = require('../core/pipePath');
 const { installPlugin } = require('./pluginInstaller');
 const { normalizeSettings, DEFAULT_SETTINGS } = require('../core/settings');
 const { sendControlCommand } = require('./controlClient');
+const os = require('node:os');
+const { parseRuleLines, validateRule, addRule, removeRule, updateRule } = require('../core/globalRules');
 
 const IS_WIN = process.platform === 'win32';
 
@@ -95,6 +97,13 @@ function positionWindow(height, contentWidth = null) {
     isMac: process.platform === 'darwin',
     bounds: display.bounds,
     workArea: display.workArea,
+    // Windows can't report the cutout, so honor the user's manual notch config.
+    // 'auto' = mac-only detection; 'on' forces fusion; 'off' disables it.
+    manual: {
+      mode: settings.notchMode,
+      notchWidth: settings.notchWidth,
+      notchHeight: settings.notchHeight,
+    },
   });
   // Never let the island grow past the bottom of the screen — clamp to the work
   // area and let the panel scroll internally for content that doesn't fit.
@@ -132,6 +141,20 @@ function positionWindow(height, contentWidth = null) {
   if (cur.x === bounds.x && cur.y === bounds.y && cur.width === bounds.width && cur.height === bounds.height) return;
   lastSetBounds = bounds;
   win.setBounds(bounds);
+  // Diagnostic: log the raw display geometry + what the notch detector made of
+  // it, so a notch-fusion issue can be diagnosed from the terminal alone
+  // (topInset is the number that decides hasNotch on macOS; appliedY tells us
+  // whether the OS actually let the window sit at the physical screen top or
+  // clamped it back down, which is what triggers the 'below' fallback).
+  console.log('[notch]', JSON.stringify({
+    topInset: display.workArea.y - display.bounds.y,
+    bounds: display.bounds,
+    workArea: display.workArea,
+    notch,
+    notchFlush,
+    requestedY: bounds.y,
+    appliedY: win.getBounds().y,
+  }));
   // Clamp probe: we asked for the physical screen top but the window came back
   // lower — this macOS/Electron combo refuses to park a borderless window over
   // the notch. Fall back to hugging the notch's bottom edge and re-place once.
@@ -162,6 +185,16 @@ function createWindow() {
     alwaysOnTop: true,
     hasShadow: false,
     fullscreenable: false,
+    // macOS: a normal (even borderless + transparent + screen-saver-level)
+    // window is still constrained by the system to `visibleFrame` — its top
+    // edge can't reach the physical top of the display, so the notch-fusion
+    // probe in positionWindow() would always detect a clamp and fall back to
+    // `notchFlush: 'below'` (bar hugs the notch's bottom edge with a visible
+    // gap instead of covering it). Declaring the window as a panel lifts it
+    // into the panel layer, which sits above the menu bar and *can* be
+    // positioned at the physical screen top — this is what makes true notch
+    // fusion possible on macOS, mirroring CodeIsland's NSPanel usage.
+    ...(process.platform === 'darwin' ? { type: 'panel' } : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -325,10 +358,18 @@ function pushSettingsStatus() {
 }
 
 function updateSettings(patch) {
+  const prevNotch = { mode: settings.notchMode, w: settings.notchWidth, h: settings.notchHeight };
   settings = normalizeSettings({ ...settings, ...patch, pricing: patch.pricing || settings.pricing });
   try { persistSettings(); } catch (error) { console.error(`settings save failed: ${error.message}`); }
   app.setLoginItemSettings({ openAtLogin: settings.launchAtLogin });
   buildTray();
+  // Notch geometry drives window placement — re-fuse the bar to the (possibly
+  // new) notch when the mode or dimensions change, otherwise the change would
+  // only take effect on the next content resize.
+  if (settings.notchMode !== prevNotch.mode || settings.notchWidth !== prevNotch.w || settings.notchHeight !== prevNotch.h) {
+    notchFlush = 'cover';
+    if (win && !win.isDestroyed()) positionWindow(win.getBounds().height);
+  }
   pushState();
   pushSettingsStatus();
   return settings;
@@ -450,6 +491,96 @@ ipcMain.handle('settings-get', () => ({
 ipcMain.handle('settings-save', (_evt, value) => updateSettings(value || {}));
 ipcMain.handle('settings-reset', () => updateSettings(DEFAULT_SETTINGS));
 ipcMain.handle('settings-open', () => { openSettingsWindow(); return true; });
+
+// ---- flavor-code GLOBAL.md management ---------------------------------
+// flavor-code injects GLOBAL.md verbatim and recognizes rules as single-line
+// `- ` bullets (contract mirrored in src/core/globalRules.js). It has no
+// per-rule switch, so "disabled" rules must physically leave the file; the
+// island keeps them in its own sidecar so toggling moves them back.
+function globalPaths() {
+  const dir = path.join(os.homedir(), '.flavor-code');
+  return { dir, file: path.join(dir, 'GLOBAL.md'), sidecar: path.join(dir, 'GLOBAL.disabled.json') };
+}
+
+function readGlobalDoc(p) {
+  try { return fs.readFileSync(p.file, 'utf8'); }
+  catch (e) { if (e.code === 'ENOENT') return ''; throw e; }
+}
+
+function readDisabledRules(p) {
+  let raw;
+  try { raw = fs.readFileSync(p.sidecar, 'utf8'); }
+  catch (e) { if (e.code === 'ENOENT') return []; throw e; }
+  const list = JSON.parse(raw);
+  if (!Array.isArray(list)) throw new Error('disabled-rules sidecar is not an array');
+  return list.filter((x) => typeof x === 'string');
+}
+
+function writeGlobalFile(p, target, content) {
+  fs.mkdirSync(p.dir, { recursive: true });
+  fs.writeFileSync(target, content);
+}
+
+const sameRule = (a, b) => String(a).trim().toLocaleLowerCase() === String(b).trim().toLocaleLowerCase();
+
+ipcMain.handle('global-list', () => {
+  const p = globalPaths();
+  const rules = parseRuleLines(readGlobalDoc(p)).map((r) => ({ text: r.text, enabled: true }));
+  const disabled = readDisabledRules(p).map((t) => ({ text: t, enabled: false }));
+  return { rules: [...rules, ...disabled], path: p.file };
+});
+
+ipcMain.handle('global-add', (_evt, text) => {
+  const p = globalPaths();
+  writeGlobalFile(p, p.file, addRule(readGlobalDoc(p), text));
+  // A fresh add supersedes any disabled twin of the same rule.
+  const disabled = readDisabledRules(p);
+  const next = disabled.filter((t) => !sameRule(t, text));
+  if (next.length !== disabled.length) writeGlobalFile(p, p.sidecar, `${JSON.stringify(next, null, 2)}\n`);
+});
+
+ipcMain.handle('global-update', (_evt, { text, newText } = {}) => {
+  const p = globalPaths();
+  const doc = readGlobalDoc(p);
+  if (parseRuleLines(doc).some((r) => sameRule(r.text, text))) {
+    writeGlobalFile(p, p.file, updateRule(doc, text, newText));
+    return;
+  }
+  const disabled = readDisabledRules(p);
+  const idx = disabled.findIndex((t) => sameRule(t, text));
+  if (idx < 0) throw new Error(`no rule matches: ${text}`);
+  disabled[idx] = validateRule(newText);
+  writeGlobalFile(p, p.sidecar, `${JSON.stringify(disabled, null, 2)}\n`);
+});
+
+ipcMain.handle('global-delete', (_evt, text) => {
+  const p = globalPaths();
+  writeGlobalFile(p, p.file, removeRule(readGlobalDoc(p), text));
+  const disabled = readDisabledRules(p);
+  const next = disabled.filter((t) => !sameRule(t, text));
+  if (next.length !== disabled.length) writeGlobalFile(p, p.sidecar, `${JSON.stringify(next, null, 2)}\n`);
+});
+
+ipcMain.handle('global-toggle', (_evt, { text, on } = {}) => {
+  const p = globalPaths();
+  if (on) {
+    const disabled = readDisabledRules(p).filter((t) => !sameRule(t, text));
+    writeGlobalFile(p, p.sidecar, `${JSON.stringify(disabled, null, 2)}\n`);
+    const doc = readGlobalDoc(p);
+    if (!parseRuleLines(doc).some((r) => sameRule(r.text, text))) writeGlobalFile(p, p.file, addRule(doc, text));
+  } else {
+    const doc = readGlobalDoc(p);
+    const match = parseRuleLines(doc).find((r) => sameRule(r.text, text));
+    if (match) {
+      writeGlobalFile(p, p.file, removeRule(doc, text));
+      const disabled = readDisabledRules(p);
+      if (!disabled.some((t) => sameRule(t, text))) {
+        disabled.push(validateRule(match.text));
+        writeGlobalFile(p, p.sidecar, `${JSON.stringify(disabled, null, 2)}\n`);
+      }
+    }
+  }
+});
 ipcMain.handle('session-control', async (_evt, { sessionId, command, message } = {}) => {
   const session = appState.snapshot().sessions[sessionId];
   if (!session) throw new Error('Session is no longer available');

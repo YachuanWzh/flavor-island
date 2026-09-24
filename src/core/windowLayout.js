@@ -39,8 +39,27 @@ function computeWindowBounds(requestedHeight, { workArea, width, topMargin = 0, 
 // [160, 240] logical points — on real notch displays this covers the physical
 // notch (14" MBP: ~204pt) since the black bar blends into the black notch.
 const NOTCH_MIN_INSET = 30;
-function computeNotchMetrics({ isMac, bounds, workArea }) {
-  if (!isMac || !bounds || !workArea) {
+function computeNotchMetrics({ isMac, bounds, workArea, manual = null } = {}) {
+  if (!bounds || !workArea) {
+    return { hasNotch: false, notchHeight: 0, notchWidth: 0 };
+  }
+  // `manual.mode` carries the user's notch preference:
+  //  - 'off': never fuse, regardless of platform (kills macOS auto-detection too).
+  //  - 'on':  fuse to the supplied dimensions on any platform — this is how a
+  //    Windows notch-screen user gets the CodeIsland look, since Windows exposes
+  //    no cutout API for auto-detection.
+  //  - 'auto' / absent: fall through to macOS auto-detection below.
+  if (manual && manual.mode === 'off') {
+    return { hasNotch: false, notchHeight: 0, notchWidth: 0 };
+  }
+  if (manual && manual.mode === 'on') {
+    return {
+      hasNotch: true,
+      notchHeight: Math.max(1, Math.round(manual.notchHeight) || 32),
+      notchWidth: Math.max(1, Math.round(manual.notchWidth) || 200),
+    };
+  }
+  if (!isMac) {
     return { hasNotch: false, notchHeight: 0, notchWidth: 0 };
   }
   const topInset = workArea.y - bounds.y;

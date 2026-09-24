@@ -18,3 +18,18 @@ test('settings reject invalid motion and clamp pricing', () => {
   assert.equal(settings.pricing.inputPerMillion, 0);
   assert.equal(settings.pricing.outputPerMillion, 2.5);
 });
+
+test('notch settings default to auto and clamp manual dimensions', () => {
+  const d = normalizeSettings();
+  assert.equal(d.notchMode, 'auto');
+  assert.equal(d.notchWidth, 200);
+  assert.equal(d.notchHeight, 32);
+  const clamped = normalizeSettings({ notchMode: 'bogus', notchWidth: 99999, notchHeight: -5 });
+  assert.equal(clamped.notchMode, 'auto');
+  assert.equal(clamped.notchWidth, 600);
+  assert.equal(clamped.notchHeight, 32);
+  const on = normalizeSettings({ notchMode: 'on', notchWidth: '180', notchHeight: '28' });
+  assert.equal(on.notchMode, 'on');
+  assert.equal(on.notchWidth, 180);
+  assert.equal(on.notchHeight, 28);
+});

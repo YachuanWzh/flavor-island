@@ -221,6 +221,20 @@ select {
 }
 select:focus { border-color: var(--pepper); box-shadow: 0 0 0 3px var(--pepper-soft); }
 
+/* Manual notch dimension fields — match the select chrome so the row reads as
+   one control family (bare number inputs would otherwise get UA defaults). */
+.setting-row input[type=number] {
+  width: 126px;
+  padding: 8px 10px;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  outline: none;
+  background: var(--field);
+  font-size: 11px;
+}
+.setting-row input[type=number]:focus { border-color: var(--pepper); box-shadow: 0 0 0 3px var(--pepper-soft); }
+
 .privacy-card { border-color: rgba(88,214,141,.25); }
 .privacy-row { min-height: 76px; }
 .privacy-icon { width: 31px; height: 31px; display: grid; place-items: center; flex: 0 0 auto; color: var(--herb); background: var(--herb-soft); border-radius: 9px; }
@@ -247,6 +261,29 @@ footer { max-width: 680px; display: flex; align-items: center; justify-content: 
 footer button { padding: 7px 9px; color: #b3bac3; border: 1px solid transparent; border-radius: 7px; background: transparent; cursor: pointer; font-size: 10px; }
 footer button:hover { color: var(--text); border-color: var(--line); background: var(--surface); }
 footer button:focus-visible { outline: 2px solid var(--pepper); outline-offset: 1px; }
+
+/* ---- Global rules manager (~/.flavor-code/GLOBAL.md) ---- */
+.global-rule-list { display: flex; flex-direction: column; }
+.global-empty { padding: 14px; margin: 0; color: var(--faint); font-size: 12px; }
+.rule-row { display: flex; align-items: center; gap: 10px; padding: 9px 14px; border-bottom: 1px solid var(--line-soft); }
+.rule-row:last-child { border-bottom: none; }
+.rule-text { flex: 1; min-width: 0; font-size: 12.5px; overflow-wrap: anywhere; }
+.rule-row.off .rule-text { color: var(--faint); text-decoration: line-through; }
+.rule-edit { flex: 1; min-width: 0; padding: 5px 8px; font: inherit; font-size: 12.5px; color: var(--text); background: var(--field); border: 1px solid var(--line); border-radius: 7px; outline: none; }
+.rule-edit:focus { border-color: var(--pepper); box-shadow: 0 0 0 3px var(--pepper-soft); }
+.rule-btn { padding: 4px 9px; font-size: 11px; color: #b3bac3; cursor: pointer; border: 1px solid var(--line); border-radius: 7px; background: transparent; }
+.rule-btn:hover { color: var(--text); border-color: var(--pepper); }
+.rule-btn.danger:hover { color: #ff5c57; border-color: rgba(255, 92, 87, .45); }
+.rule-btn:focus-visible { outline: 2px solid var(--pepper); outline-offset: 1px; }
+.global-add { display: flex; gap: 8px; padding: 11px 14px; }
+.global-add input { flex: 1; min-width: 0; padding: 6px 9px; font: inherit; color: var(--text); background: var(--field); border: 1px solid var(--line); border-radius: 8px; outline: none; }
+.global-add input:focus { border-color: var(--pepper); box-shadow: 0 0 0 3px var(--pepper-soft); }
+.global-add button { padding: 6px 14px; font-size: 12px; color: var(--text); cursor: pointer; background: var(--surface-hover); border: 1px solid var(--line); border-radius: 8px; }
+.global-add button:hover { border-color: var(--pepper); }
+.global-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 14px 12px; }
+.global-status { font-size: 11px; color: var(--herb); min-height: 14px; }
+.global-status.error { color: #ff5c57; }
+.global-path { font-size: 10px; color: var(--faint); overflow-wrap: anywhere; text-align: right; }
 
 @media (max-width: 760px) {
   .app-shell { grid-template-columns: 178px minmax(0, 1fr); }
