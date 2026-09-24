@@ -23,6 +23,29 @@ let reducedMotion = SYSTEM_REDUCED_MOTION;
 // instead of being clipped into a hard line by body{overflow:hidden}.
 const SHADOW_PAD = 28;
 
+// The notch-fused bar keeps a strict, state-independent width: it is sized to
+// fit the idle brand text ("Flavor Island") so the brand always reads in full,
+// and longer tool/status text truncates into that same fixed slot instead of
+// stretching the bar. Measure the brand once the pixel font is ready — a
+// pre-load measure would use the fallback face and mis-size the slot.
+function measureBrandWidth() {
+  const probe = document.createElement('span');
+  probe.className = 'pill-status brand';
+  probe.textContent = 'Flavor Island';
+  probe.style.cssText = 'position:absolute;visibility:hidden;max-width:none;width:auto;white-space:nowrap;';
+  document.body.appendChild(probe);
+  const w = Math.ceil(probe.getBoundingClientRect().width);
+  probe.remove();
+  if (w > 0) {
+    document.documentElement.style.setProperty('--brand-w', `${w}px`);
+    // The bar width is derived from this slot, so re-measure and re-report the
+    // window size now that the real (font-loaded) width is known.
+    if (typeof rerender === 'function' && lastRenderState) rerender();
+  }
+}
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(measureBrandWidth);
+else measureBrandWidth();
+
 const SOUND_MAP = {
   SessionStart: '8bit_boot',
   UserPromptSubmit: '8bit_submit',
@@ -554,6 +577,10 @@ function render({ model, pending, sounds, settings = {}, notch: notchInfo = null
   if (notchInfo && notchInfo.hasNotch) {
     document.documentElement.style.setProperty('--notch-h', `${notchInfo.notchHeight}px`);
     document.documentElement.style.setProperty('--notch-w', `${notchInfo.notchWidth}px`);
+    // Cover mode lifts the window above the screen top to hide macOS's rounded
+    // window corners; pad the bar's content down by the same amount so its
+    // square top edge still lands flush on y=0.
+    document.documentElement.style.setProperty('--notch-overscan', `${notchInfo.overscan || 0}px`);
     document.body.classList.add('notch');
     // 'below' = macOS clamped the window under the notch; the bar hugs the
     // notch's bottom edge at wing height instead of covering the cutout.
@@ -571,9 +598,16 @@ function render({ model, pending, sounds, settings = {}, notch: notchInfo = null
   pillEl.setAttribute('aria-expanded', String(panelOpen));
   pillEl.className = `pill state-${model.mascotState}`;
   mascot.setState(model.mascotState);
-  // Session-count badge: always visible once any session exists (collapsed or
-  // not) so multi-session navigation doesn't require expanding first.
-  pillCountEl.textContent = model.count > 0 ? String(model.count) : '';
+  // Session-count badge: CodeIsland's compact right wing reads active/total
+  // ("2/3") so a running session is visible at a glance even collapsed, and
+  // just the total when nothing is active. The count slot is a fixed width in
+  // notch mode (see body.notch .pill-count) so this text never shifts the bar.
+  const activeCount = model.rows.reduce(
+    (n, r) => n + (r.statusKey && r.statusKey !== 'idle' ? 1 : 0), 0
+  );
+  pillCountEl.textContent = model.count > 0
+    ? (activeCount > 0 ? `${activeCount}/${model.count}` : String(model.count))
+    : '';
 
   // Main debounces tool chips, but a reveal/swap still changes the pill text
   // and thus its width — tween the width so the pill stretches instead of
@@ -587,13 +621,17 @@ function render({ model, pending, sounds, settings = {}, notch: notchInfo = null
     pillStatusEl.classList.add('brand');
     pillStatusEl.textContent = 'Flavor Island';
   } else if (top.tool) {
-    // Active tool reads like CodeIsland's compact wing: colored tool name plus
-    // the first line of its description ("Bash · npm test").
+    // CodeIsland's compact notch wing shows ONLY the short colored tool name
+    // ("Bash", "Edit") — the project title and description live in the
+    // expanded panel. Keeping the slot to one short word means it always fits
+    // the fixed --brand-w width and never truncates mid-tool-name.
     pillStatusEl.classList.add(`tk-${top.toolKey || 'tool'}`);
-    const desc = top.toolDescription ? ` · ${String(top.toolDescription).split('\n')[0].slice(0, 60)}` : '';
-    pillStatusEl.textContent = `${top.title} · ${top.tool}${desc}`;
+    pillStatusEl.textContent = top.tool;
   } else if (top.pending) {
-    pillStatusEl.textContent = `${top.title} · ${top.statusLabel}`;
+    // Needs a human decision: short accent label (matches the bell badge in
+    // CodeIsland's right wing) instead of the long "title · Needs approval".
+    pillStatusEl.classList.add('pending');
+    pillStatusEl.textContent = top.statusKey === 'waitingQuestion' ? 'Question' : 'Approval';
   } else {
     pillStatusEl.textContent = top.statusLabel;
   }
@@ -764,15 +802,13 @@ function render({ model, pending, sounds, settings = {}, notch: notchInfo = null
     let w = null;
     if (notchMode) {
       // Notch mode zeroes the island padding (the bar must touch the screen top
-      // edge) and has no drop shadow to reserve room for. Width is content-
-      // driven like CodeIsland's panelWidth: collapsed = the bar's natural
-      // width (notch gap + wings), expanded = the panel's content width.
+      // edge) and has no drop shadow to reserve room for. Width is a strict
+      // constant — always the bar's own width (sized to the brand slot via
+      // --brand-w), never the expanded panel's content width — so clicking to
+      // expand changes height only and the fused bar never stretches or shifts.
       h = Math.ceil(pillRect.height) + 4 /* buffer */;
       if (expanded) h += panelEl.scrollHeight;
-      const contentW = expanded
-        ? Math.ceil(Math.max(panelEl.scrollWidth, panelEl.getBoundingClientRect().width))
-        : Math.ceil(pillRect.width);
-      w = contentW + 8 /* shoulder tabs stick out 3px each side */;
+      w = Math.ceil(pillRect.width) + 8 /* shoulder tabs stick out 3px each side */;
     } else {
       h = Math.ceil(pillRect.height) + 8 /* island top+bottom padding */ + 4 /* buffer */;
       if (expanded) h += 6 /* gap above panel */ + panelEl.scrollHeight;
@@ -813,6 +849,10 @@ function togglePanel() {
 
 pillEl.addEventListener('mousedown', (e) => {
   if (e.button !== 0) return; // left button only
+  // A notch-fused bar is pinned to the physical notch — dragging it off makes
+  // no sense (and on macOS the fused window shouldn't leave the screen top),
+  // so drag is disabled entirely while fused. A click still expands the panel.
+  if (document.body.classList.contains('notch')) return;
   dragStart = { mouseX: e.screenX, mouseY: e.screenY, winX: window.screenX, winY: window.screenY, moved: false };
   e.preventDefault();
 });

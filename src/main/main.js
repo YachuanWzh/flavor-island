@@ -11,10 +11,12 @@ const { pipePath } = require('../core/pipePath');
 const { installPlugin } = require('./pluginInstaller');
 const { normalizeSettings, DEFAULT_SETTINGS } = require('../core/settings');
 const { sendControlCommand } = require('./controlClient');
+const { applyNotchStationary } = require('./notchStationary');
 const os = require('node:os');
 const { parseRuleLines, validateRule, addRule, removeRule, updateRule } = require('../core/globalRules');
 
 const IS_WIN = process.platform === 'win32';
+const IS_MAC = process.platform === 'darwin';
 
 if (IS_WIN) {
   // The island is a pure DOM overlay — no GPU work at all. On machines without a
@@ -87,6 +89,13 @@ let notchFlush = 'cover';
 // CodeIsland sizing rules: collapsed bar = notch + two content wings; the
 // expanded panel widens toward ~580 logical px, capped by the screen width.
 const NOTCH_MIN_WING = 60;
+// macOS rounds the corners of every window at the system level (since Big Sur,
+// including borderless panels), which bites blue into the fused bar's top
+// corners. Lift the cover-mode window this many px above the physical screen
+// top and pad the bar's content down by the same amount, so those rounded
+// corners land off-screen and the bar's own square top edge sits exactly on
+// y=0. A no-op if the OS doesn't round (just an off-screen transparent strip).
+const NOTCH_TOP_OVERSCAN = IS_MAC ? 8 : 0;
 
 function positionWindow(height, contentWidth = null) {
   if (!win || win.isDestroyed()) return;
@@ -121,7 +130,16 @@ function positionWindow(height, contentWidth = null) {
       width = Math.max(width, Math.min(Math.max(notch.notchWidth + 200, 580), contentWidth));
     }
     bounds = computeNotchWindowBounds(height, { bounds: display.bounds, width });
-    if (notchFlush === 'below') bounds.y = display.workArea.y;
+    if (notchFlush === 'below') {
+      bounds.y = display.workArea.y;
+    } else {
+      // cover: lift the window above the physical top and grow it by the same
+      // amount so the bar's content (padded down by --notch-overscan in CSS)
+      // still lands flush on y=0 while macOS's rounded window corners sit
+      // off-screen. See NOTCH_TOP_OVERSCAN.
+      bounds.y = display.bounds.y - NOTCH_TOP_OVERSCAN;
+      bounds.height = Math.min(bounds.height + NOTCH_TOP_OVERSCAN, display.bounds.height);
+    }
     if (userPosition) {
       bounds.x = Math.round(Math.min(Math.max(userPosition.x, display.bounds.x),
         display.bounds.x + display.bounds.width - bounds.width));
@@ -155,12 +173,14 @@ function positionWindow(height, contentWidth = null) {
     requestedY: bounds.y,
     appliedY: win.getBounds().y,
   }));
-  // Clamp probe: we asked for the physical screen top but the window came back
-  // lower — this macOS/Electron combo refuses to park a borderless window over
-  // the notch. Fall back to hugging the notch's bottom edge and re-place once.
-  if (notch.hasNotch && notchFlush === 'cover' && bounds.y === display.bounds.y) {
+  // Clamp probe: we asked to sit at (or above) the physical screen top but the
+  // window came back lower — this macOS/Electron combo refuses to park the
+  // window over the notch. Fall back to hugging the notch's bottom edge and
+  // re-place once. (With the cover overscan, the requested y is already above
+  // bounds.y, so any downward clamp is the signal.)
+  if (notch.hasNotch && notchFlush === 'cover') {
     const applied = win.getBounds();
-    if (applied.y !== display.bounds.y) {
+    if (applied.y > display.bounds.y) {
       notchFlush = 'below';
       positionWindow(height, contentWidth);
       return;
@@ -221,6 +241,11 @@ function createWindow() {
     rendererReady = true;
     // Render whatever state accumulated while the page was loading.
     pushState();
+    // The window title (used to locate the NSWindow) is applied from the HTML
+    // <title> only once the page has loaded, so this is the earliest reliable
+    // point to pin the notch window's collection behavior. A short defer lets
+    // AppKit finish registering the window in NSApp.windows.
+    if (IS_MAC) setTimeout(() => applyNotchStationary(), 300);
   });
   islandWindow.webContents.on('render-process-gone', () => {
     if (win !== islandWindow) return;
@@ -258,7 +283,14 @@ function pushState(effects = []) {
     pending: appState.listPending(),
     sounds,
     settings,
-    notch: { ...notch, flush: notchFlush },
+    notch: {
+      ...notch,
+      flush: notchFlush,
+      // How far the cover-mode window is lifted above the screen top; the
+      // renderer pads the bar's content down by the same amount so its square
+      // top edge still lands exactly on y=0 (see --notch-overscan).
+      overscan: notch.hasNotch && notchFlush === 'cover' ? NOTCH_TOP_OVERSCAN : 0,
+    },
   });
 }
 

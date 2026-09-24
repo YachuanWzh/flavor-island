@@ -13,6 +13,9 @@
     "installer": "electron-builder --win nsis"
   },
   "license": "MIT",
+  "dependencies": {
+    "koffi": "^2.9.2"
+  },
   "devDependencies": {
     "electron": "^42.7.0",
     "electron-builder": "^24.13.3"
@@ -25,7 +28,8 @@
       "!**/*.test.js"
     ],
     "asarUnpack": [
-      "src/core/**"
+      "src/core/**",
+      "**/node_modules/koffi/**"
     ],
     "directories": {
       "output": "release"
