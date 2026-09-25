@@ -17,16 +17,15 @@
    side. */
 body.notch .island { padding: var(--notch-overscan, 0px) 0 0; }
 body.notch .pill {
-  --wing-w: calc(var(--brand-w, 120px) + 72px);
+  --wing-w: 44px;
   position: relative;
   margin: 0 4px;
-  /* Equal wings keep the camera gap centered on the physical display. A
-     content-sized flex row shifted the gap toward the short mascot wing and
-     hid the start of the name behind the camera. */
+  /* CodeIsland's compact bar: mascot/tool on the left, count on the right,
+     with equal wings keeping the physical camera gap centered. */
   display: grid;
   grid-template-columns: var(--wing-w) calc(var(--notch-w, 200px) + 12px) var(--wing-w);
   gap: 0;
-  width: max-content;
+  width: calc(var(--wing-w) + var(--wing-w) + var(--notch-w, 200px) + 12px);
   max-width: none;
   height: var(--notch-h, 32px);
   border: none;
@@ -35,35 +34,52 @@ body.notch .pill {
   box-shadow: none;
   padding: 0;
 }
+body.notch .pill.has-tool { --wing-w: 88px; }
+body.notch .island:not(.collapsed) .pill {
+  width: calc(100% - 8px);
+  grid-template-columns: minmax(0, 1fr) calc(var(--notch-w, 200px) + 12px) minmax(0, 1fr);
+  /* Expanded bar and panel form one silhouette: only the panel's outer bottom
+     corners are rounded. */
+  border-radius: 0;
+}
 body.notch .pill-left,
 body.notch .pill-right { display: flex; align-items: center; min-width: 0; }
-body.notch .pill-left { padding-left: 12px; }
-body.notch .pill-right { gap: 8px; padding: 0 12px; }
+body.notch .pill-left { gap: 6px; padding: 0 6px; }
+body.notch .pill-right {
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  padding: 0 6px;
+}
 body:not(.notch) .pill-left,
 body:not(.notch) .pill-right { display: contents; }
-/* Fixed brand slot: the status text always reserves exactly the brand width
-   (--brand-w, measured in JS from "Flavor Island"), so the bar width never
-   changes between idle / tool-running / expanded — longer tool text simply
-   truncates with an ellipsis into the same slot. */
+/* The compact notch shows only the short tool label. Session names remain in
+   the expanded list; branding is carried by the mascot. */
+body.notch .pill-status:not(.tool) { display: none; }
 body.notch .pill-status {
-  flex: 0 0 var(--brand-w, 120px);
-  width: var(--brand-w, 120px);
-  max-width: var(--brand-w, 120px);
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: none;
+  font-size: 10px;
+  text-align: left;
 }
-/* Keep the fused bar a strict constant width: the thinking dots and the count
-   badge would otherwise add/remove width as state changes. Dots are dropped
-   (state already reads via text color, matching CodeIsland's compact wings);
-   the count badge keeps its slot reserved (invisible when empty) so it never
-   shifts the bar. */
 body.notch .pill-dots { display: none !important; }
 body.notch .pill-count:empty { display: inline-block; visibility: hidden; }
-/* Reserve the count slot so starting and finishing work never shifts the bar.
-   The empty :empty rule above keeps the slot reserved when hidden. */
 body.notch .pill-count {
   flex: 0 0 auto;
-  width: 40px;
+  min-width: 0;
+  width: auto;
   box-sizing: border-box;
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--mint);
+  font: 600 12px/1 var(--font);
+  text-align: center;
 }
+.pill-alert { display: none; width: 10px; height: 10px; fill: var(--warn); flex-shrink: 0; }
+body.notch .pill-alert.visible { display: block; }
 /* Shoulders: the black flare outside each top corner — the region ABOVE the
    arc (toward the bar's top edge) is black, the region below it transparent.
    For the left tab that is everything outside a circle of radius --notch-ext
@@ -109,10 +125,20 @@ body.notch.notch-below .pill::after {
 body.notch .panel {
   width: calc(100% - 8px);
   margin-top: 0;
+  position: relative;
+  background: #000;
   border: none;
-  border-top: 1px solid var(--line);
   border-radius: 0 0 24px 24px;
   box-shadow: none;
+  padding-top: 10px;
+}
+body.notch .panel::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 12px;
+  right: 12px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.15);
 }
 /* Glows on the notch bar would break the black-into-black blend; state color
    still reads through the status text and mascot. */

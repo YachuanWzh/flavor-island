@@ -94,8 +94,8 @@ let notchFlush = 'cover';
 // Preserve the renderer's measured bar width across reset/display/settings
 // repositions. Those calls do not carry a fresh measurement.
 let notchContentWidth = null;
-// Minimum wing size before the renderer reports the actual content width.
-const NOTCH_MIN_WING = 60;
+// Match the compact mascot/count wings before the renderer reports a width.
+const NOTCH_MIN_WING = 44;
 // macOS rounds the corners of every window at the system level (since Big Sur,
 // including borderless panels), which bites blue into the fused bar's top
 // corners. Lift the cover-mode window this many px above the physical screen

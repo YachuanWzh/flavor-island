@@ -112,7 +112,7 @@ test('computeNotchMetrics auto mode falls back to macOS detection', () => {
   assert.equal(m.notchHeight, 38);
 });
 
-test('notch width preserves the measured brand slot past 580px', () => {
+test('notch width preserves a measured expanded panel past 580px', () => {
   assert.equal(computeNotchContentWidth(212, null), 332);
   assert.equal(computeNotchContentWidth(212, 586), 586);
 });

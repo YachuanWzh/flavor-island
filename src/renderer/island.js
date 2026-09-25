@@ -8,6 +8,7 @@ const islandEl = document.getElementById('island');
 const pillEl = document.getElementById('pill');
 const pillStatusEl = document.getElementById('pill-status');
 const pillCountEl = document.getElementById('pill-count');
+const pillAlertEl = document.getElementById('pill-alert');
 const panelEl = document.getElementById('panel');
 
 // Canvas pixel mascot (sleep / typing / startled scenes, see mascot.js).
@@ -22,33 +23,6 @@ let reducedMotion = SYSTEM_REDUCED_MOTION;
 // Vertical room reserved below the content so the drop shadow renders fully
 // instead of being clipped into a hard line by body{overflow:hidden}.
 const SHADOW_PAD = 28;
-
-// The notch-fused bar keeps a strict, state-independent width: it is sized to
-// fit the idle brand text ("Flavor Island") so the brand always reads in full,
-// and longer tool/status text truncates into that same fixed slot instead of
-// stretching the bar. Measure the brand once the pixel font is ready — a
-// pre-load measure would use the fallback face and mis-size the slot.
-function measureBrandWidth() {
-  const probe = document.createElement('span');
-  probe.className = 'pill-status brand';
-  probe.textContent = 'Flavor Island';
-  probe.style.cssText = 'position:absolute;visibility:hidden;max-width:none;width:auto;white-space:nowrap;';
-  document.body.appendChild(probe);
-  // Leave a few pixels beyond the measured glyphs: fractional device scaling
-  // and Silkscreen's letter spacing can otherwise trigger an ellipsis.
-  const w = Math.ceil(probe.getBoundingClientRect().width) + 8;
-  probe.remove();
-  if (w > 0) {
-    document.documentElement.style.setProperty('--brand-w', `${w}px`);
-    // The bar width is derived from this slot, so re-measure and re-report the
-    // window size now that the real (font-loaded) width is known.
-    if (typeof rerender === 'function' && lastRenderState) rerender();
-  }
-}
-if (document.fonts && document.fonts.load) {
-  document.fonts.load('10px Silkscreen', 'Flavor Island').then(measureBrandWidth, measureBrandWidth);
-}
-else measureBrandWidth();
 
 const SOUND_MAP = {
   SessionStart: '8bit_boot',
@@ -604,34 +578,34 @@ function render({ model, pending, sounds, settings = {}, notch: notchInfo = null
   islandEl.classList.toggle('collapsed', !panelOpen);
   pillEl.setAttribute('aria-expanded', String(panelOpen));
   pillEl.setAttribute('aria-disabled', String(!hasPanelContent));
+  pillEl.setAttribute('aria-label', hasPanelContent
+    ? `Flavor Island，${model.activeCount} 个进行中的会话${model.requiresAttention ? '，需要处理' : ''}，点击展开会话`
+    : 'Flavor Island，暂无会话');
   pillEl.title = hasPanelContent
     ? (notchInfo?.hasNotch ? '点击展开会话' : '点击展开会话；拖动可移动窗口')
     : '暂无会话；右键打开菜单';
-  pillEl.className = `pill state-${model.mascotState}`;
+  const top = model.rows[0];
+  pillEl.className = `pill state-${model.mascotState}${top?.tool ? ' has-tool' : ''}`;
   mascot.setState(model.mascotState);
-  // The compact badge reports work in progress. Idle sessions remain in the
-  // panel, but counting them here makes the badge look like extra running work.
-  // Notch mode reserves this slot even when the count is hidden.
-  pillCountEl.textContent = model.activeCount > 0 ? String(model.activeCount) : '';
-  pillCountEl.title = model.activeCount > 0 ? `${model.activeCount} 个进行中的会话` : '';
+  // CodeIsland's right wing shows the session count. Keep this one strictly
+  // active so an idle session cannot look like an extra running process.
+  pillCountEl.textContent = model.count > 0 ? String(model.activeCount) : '';
+  pillCountEl.title = `${model.activeCount} 个进行中的会话`;
+  pillAlertEl.classList.toggle('visible', model.requiresAttention);
 
   // Main debounces tool chips, but a reveal/swap still changes the pill text
   // and thus its width — tween the width so the pill stretches instead of
   // snapping (a hard jump reads as flicker on the transparent window).
   const pillW0 = pillEl.getBoundingClientRect().width;
 
-  const top = model.rows[0];
   pillStatusEl.className = 'pill-status';
   if (!top) {
     // Brand/idle reading takes the pixel display face (see .pill-status.brand).
     pillStatusEl.classList.add('brand');
     pillStatusEl.textContent = 'Flavor Island';
   } else if (top.tool) {
-    // CodeIsland's compact notch wing shows ONLY the short colored tool name
-    // ("Bash", "Edit") — the project title and description live in the
-    // expanded panel. Keeping the slot to one short word means it always fits
-    // the fixed --brand-w width and never truncates mid-tool-name.
-    pillStatusEl.classList.add(`tk-${top.toolKey || 'tool'}`);
+    // The compact left wing mirrors CodeIsland: mascot plus a short tool name.
+    pillStatusEl.classList.add('tool', `tk-${top.toolKey || 'tool'}`);
     pillStatusEl.textContent = top.tool;
   } else if (top.pending) {
     // Needs a human decision: short accent label (matches the bell badge in
@@ -642,7 +616,7 @@ function render({ model, pending, sounds, settings = {}, notch: notchInfo = null
     pillStatusEl.textContent = top.statusLabel;
   }
 
-  if (!reducedMotion && typeof pillEl.animate === 'function') {
+  if (!reducedMotion && !notchInfo?.hasNotch && typeof pillEl.animate === 'function') {
     const pillW1 = pillEl.getBoundingClientRect().width;
     if (Math.abs(pillW1 - pillW0) > 2) {
       pillEl.animate(
@@ -807,14 +781,14 @@ function render({ model, pending, sounds, settings = {}, notch: notchInfo = null
     let h;
     let w = null;
     if (notchMode) {
-      // Notch mode zeroes the island padding (the bar must touch the screen top
-      // edge) and has no drop shadow to reserve room for. Width is a strict
-      // constant — always the bar's own width (sized to the brand slot via
-      // --brand-w), never the expanded panel's content width — so clicking to
-      // expand changes height only and the fused bar never stretches or shifts.
+      // CodeIsland uses a narrow compact bar and a wider panel only when there
+      // is content to show. Widths remain symmetric around the physical notch.
       h = Math.ceil(pillRect.height) + 4 /* buffer */;
       if (expanded) h += panelEl.scrollHeight;
-      w = Math.ceil(pillRect.width) + 8 /* shoulder tabs stick out 3px each side */;
+      const compactWidth = Math.ceil(pillRect.width) + 8 /* shoulder tabs */;
+      w = expanded
+        ? Math.max(compactWidth, Math.min(620, Math.max(580, (notchInfo?.notchWidth || 200) + 200)))
+        : compactWidth;
     } else {
       h = Math.ceil(pillRect.height) + 8 /* island top+bottom padding */ + 4 /* buffer */;
       if (expanded) h += 6 /* gap above panel */ + panelEl.scrollHeight;
