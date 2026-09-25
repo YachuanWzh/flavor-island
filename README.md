@@ -55,12 +55,12 @@ The plugin:
 
 1. Captures the full lifecycle through flavor-code's hook system — `SessionStart` / `UserPromptSubmit` / `PreToolUse` / `PostToolUse` / `PermissionRequest` / `Stop` and more.
 2. Forwards events through the persistent `bridgeRelay.mjs` / `bridgeDaemon.mjs` pair to the endpoint the island listens on:
-   - **Windows**: named pipe `\\.\pipe\codeisland-<user>` (overridable with `CODEISLAND_PIPE`)
-   - **macOS**: Unix socket `/tmp/codeisland-<uid>.sock` (overridable with `CODEISLAND_SOCKET_PATH`, following CodeIsland's original convention)
+   - **Windows**: named pipe `\\.\pipe\flavor-island-<user>` (overridable with `FLAVOR_ISLAND_PIPE`)
+   - **macOS**: Unix socket `/tmp/flavor-island-<uid>.sock` (overridable with `FLAVOR_ISLAND_SOCKET_PATH`)
 3. Blocks on `PermissionRequest` and waits for the island's decision (allow / allow-all / deny); flavor-code decides whether session authorization is safe for the category, and the island never keeps a second permission cache. It falls back to `ask` when unreachable, returning approval to the terminal without blocking flavor-code.
 4. `AskUserQuestion` is relayed the same way through `PermissionRequest`: the island pops up a selection panel (pick an option / custom input, then confirm to submit) and the answer is written back through the decision's `updatedInput`; if the island doesn't respond, flavor-code automatically falls back to asking in the terminal — either end covers the other.
 
-The global plugin directory applies to every project — **no `flavor init` or per-project configuration needed**. If an older project still has the built-in `codeisland` plugin, protocol v2 merges duplicate relays by stable `eventId` without mistaking a later identical operation for a replay.
+The global plugin directory applies to every project — **no `flavor init` or per-project configuration needed**. Restart a flavor-code session after the first install or a plugin upgrade, since it loads plugins at session startup. Older `codeisland` plugins use CodeIsland's separate endpoint.
 
 ## 🔌 How it works
 
@@ -68,8 +68,8 @@ The global plugin directory applies to every project — **no `flavor init` or p
 flavor-code (CLI)
   → flavor-island plugin (~/.flavor-code/plugins, auto-installed when the island starts)
     → bridgeRelay.mjs → bridgeDaemon.mjs
-      → Windows: \\.\pipe\codeisland-<user>
-      → macOS:   /tmp/codeisland-<uid>.sock
+      → Windows: \\.\pipe\flavor-island-<user>
+      → macOS:   /tmp/flavor-island-<uid>.sock
         → Flavor Island (Electron)
           → real-time island UI updates (status color / animation / session list)
           → approval / answer decisions written back to the socket → bridge converts to hook decision

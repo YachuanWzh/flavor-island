@@ -144,7 +144,9 @@ export function transformEvent(event) {
       ? payload.sessionId
       : `flavor-${process.ppid || process.pid}`,
     _source: 'flavor-code',
-    _ppid: process.ppid || process.pid,
+    // This plugin runs inside flavor-code itself. Its PID identifies the host
+    // process for stale-session cleanup; process.ppid identifies its launcher.
+    _ppid: process.pid,
   };
   if (typeof payload.protocolVersion === 'number') result.protocol_version = payload.protocolVersion;
   if (typeof payload.eventId === 'string') result.event_id = payload.eventId;
@@ -177,6 +179,7 @@ export function transformEvent(event) {
   //   UserPromptSubmit        -> { prompt }     (last user message)
   //   Stop                    -> { outcome }    (completed/interrupted/…)
   if (typeof payload.workspace === 'string') result.cwd = payload.workspace;
+  if (typeof payload.sessionTitle === 'string') result.session_title = safeString(payload.sessionTitle, 120);
   if (typeof payload.prompt === 'string') result.prompt = safeString(payload.prompt, 1200);
   if (typeof payload.outcome === 'string') result.stop_reason = payload.outcome;
   if (typeof payload.kind === 'string') result.notification_kind = payload.kind;
@@ -198,7 +201,7 @@ export function transformEvent(event) {
   if (event.type === 'LoopEnd') {
     if (typeof payload.loopId === 'string') result.loop_id = payload.loopId;
     if (typeof payload.outcome === 'string') result.loop_outcome = payload.outcome;
-    if (typeof payload.reason === 'string') result.loop_reason = payload.reason;
+    if (typeof payload.reason === 'string') result.loop_reason = safeString(payload.reason, 2000);
     if (payload.verification && typeof payload.verification === 'object') {
       result.loop_verification = sanitizeVerification(payload.verification);
     }

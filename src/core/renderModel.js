@@ -75,7 +75,7 @@ function toolKeyFor(toolName) {
 }
 
 function titleFor(id, session) {
-  return basename(session.cwd) || (typeof id === 'string' ? id.slice(0, 8) : 'session');
+  return session.title || basename(session.cwd) || (typeof id === 'string' ? id.slice(0, 8) : 'session');
 }
 
 function taskProgress(snapshot, privateMode = false) {
@@ -151,7 +151,7 @@ function renderModel(state = {}, settings = {}) {
       id,
       source: session.source || 'flavor',
       icon: session.source || 'flavor',
-      title: titleFor(id, session),
+      title: privateMode ? (basename(session.cwd) || 'Session') : titleFor(id, session),
       statusKey: session.status || 'idle',
       statusLabel: statusLabel(session),
       tool: session.currentTool || null,
@@ -209,6 +209,7 @@ function renderModel(state = {}, settings = {}) {
     (r) => r.statusKey === 'waitingApproval' || r.statusKey === 'waitingQuestion'
   );
   const hasProgress = rows.some((r) => r.taskProgress?.active || r.loopOutcome);
+  const activeCount = rows.filter((row) => row.statusKey !== 'idle').length;
 
   return {
     collapsed: !(hasPending || hasProgress),
@@ -217,6 +218,7 @@ function renderModel(state = {}, settings = {}) {
     autoExpand: settings.autoExpand !== false,
     privacyMode: privateMode,
     count: rows.length,
+    activeCount,
     rows,
     // Quiet mode collapses the panel until a decision is pending, but the
     // always-visible pill still reflects the top session's status so the mascot

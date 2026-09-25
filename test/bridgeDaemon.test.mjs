@@ -44,7 +44,7 @@ function fakeIsland(reply) {
 
 function startDaemon(pipe) {
   const child = spawn(process.execPath, [DAEMON], {
-    env: { ...process.env, CODEISLAND_PIPE: pipe },
+    env: { ...process.env, FLAVOR_ISLAND_PIPE: pipe, FLAVOR_ISLAND_SOCKET_PATH: pipe },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   return child;

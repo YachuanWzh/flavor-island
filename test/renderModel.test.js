@@ -16,6 +16,7 @@ test('empty state yields collapsed empty model', () => {
   const m = renderModel({});
   assert.equal(m.collapsed, true);
   assert.equal(m.count, 0);
+  assert.equal(m.activeCount, 0);
   assert.deepEqual(m.rows, []);
   assert.equal(m.mascotState, 'idle');
 });
@@ -30,6 +31,12 @@ test('pending session expands the island', () => {
   assert.equal(m.rows[0].title, 'proj');
   assert.equal(m.rows[0].pending, true);
   assert.equal(m.mascotState, 'waiting');
+});
+
+test('task title wins over workspace name and privacy mode hides it', () => {
+  const state = { sessions: { s1: session(Status.idle, { cwd: 'C:\\proj', title: 'Private task title' }) } };
+  assert.equal(renderModel(state).rows[0].title, 'Private task title');
+  assert.equal(renderModel(state, { privacyMode: true }).rows[0].title, 'proj');
 });
 
 test('quiet activity stays collapsed but mascot reflects top state', () => {
@@ -62,6 +69,17 @@ test('waiting sessions sort above running above idle', () => {
     },
   });
   assert.deepEqual(m.rows.map((r) => r.id), ['ask', 'run', 'idle']);
+  assert.equal(m.count, 3);
+  assert.equal(m.activeCount, 2);
+});
+
+test('idle sessions remain listed without increasing the active count', () => {
+  const m = renderModel({ sessions: {
+    first: session(Status.idle),
+    second: session(Status.idle),
+  } });
+  assert.equal(m.count, 2);
+  assert.equal(m.activeCount, 0);
 });
 
 test('model and agent metadata surface in rows', () => {

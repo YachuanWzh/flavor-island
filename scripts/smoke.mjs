@@ -9,8 +9,8 @@ import { setTimeout as sleep } from 'node:timers/promises';
 
 const USER = (process.env.USERNAME || process.env.USER || 'default').trim() || 'default';
 const PIPE = process.platform === 'win32'
-  ? `\\\\.\\pipe\\codeisland-${USER}`
-  : `/tmp/codeisland-${process.getuid ? process.getuid() : 0}.sock`;
+  ? `\\\\.\\pipe\\flavor-island-${USER}`
+  : `/tmp/flavor-island-${process.getuid ? process.getuid() : 0}.sock`;
 
 const electronBin = process.platform === 'win32'
   ? 'node_modules\\electron\\dist\\electron.exe'

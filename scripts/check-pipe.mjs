@@ -2,12 +2,12 @@ import net from 'node:net';
 
 function endpoint() {
   if (process.platform === 'win32') {
-    if (process.env.CODEISLAND_PIPE) return process.env.CODEISLAND_PIPE;
+    if (process.env.FLAVOR_ISLAND_PIPE) return process.env.FLAVOR_ISLAND_PIPE;
     const USER = (process.env.USERNAME || process.env.USER || 'default').trim() || 'default';
-    return `\\\\.\\pipe\\codeisland-${USER}`;
+    return `\\\\.\\pipe\\flavor-island-${USER}`;
   }
-  if (process.env.CODEISLAND_SOCKET_PATH) return process.env.CODEISLAND_SOCKET_PATH;
-  return `/tmp/codeisland-${process.getuid ? process.getuid() : 0}.sock`;
+  if (process.env.FLAVOR_ISLAND_SOCKET_PATH) return process.env.FLAVOR_ISLAND_SOCKET_PATH;
+  return `/tmp/flavor-island-${process.getuid ? process.getuid() : 0}.sock`;
 }
 
 const PIPE = endpoint();

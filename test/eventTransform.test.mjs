@@ -70,6 +70,14 @@ test('baseline: session identity metadata is preserved', () => {
   assert.ok(out._ppid > 0);
 });
 
+test('session title is bounded and loop reason is redacted', () => {
+  const title = transformEvent(evt('SessionStart', { sessionTitle: 'Task '.repeat(100) }));
+  assert.equal(title.session_title.length, 120);
+  const loop = transformEvent(evt('LoopEnd', { reason: 'api_key=secret-value ' + 'x'.repeat(5000) }));
+  assert.ok(loop.loop_reason.includes('[REDACTED]'));
+  assert.equal(loop.loop_reason.length, 2000);
+});
+
 test('protocol v2 preserves stable session, event, and tool-call identity', () => {
   const out = transformEvent(evt('PermissionRequest', {
     protocolVersion: 2,

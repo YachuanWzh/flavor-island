@@ -14,18 +14,18 @@ const PIPE_TIMEOUT_MS = 4000;
 
 function endpoint() {
   if (process.platform === "win32") {
-    if (process.env.CODEISLAND_PIPE && process.env.CODEISLAND_PIPE.trim()) {
-      return process.env.CODEISLAND_PIPE.trim();
+    if (process.env.FLAVOR_ISLAND_PIPE && process.env.FLAVOR_ISLAND_PIPE.trim()) {
+      return process.env.FLAVOR_ISLAND_PIPE.trim();
     }
     const user = (process.env.USERNAME || process.env.USER || "default").trim() || "default";
     const sep = String.fromCharCode(92);
-    return sep + sep + "." + sep + "pipe" + sep + "codeisland-" + user;
+    return sep + sep + "." + sep + "pipe" + sep + "flavor-island-" + user;
   }
-  if (process.env.CODEISLAND_SOCKET_PATH && process.env.CODEISLAND_SOCKET_PATH.trim()) {
-    return process.env.CODEISLAND_SOCKET_PATH.trim();
+  if (process.env.FLAVOR_ISLAND_SOCKET_PATH && process.env.FLAVOR_ISLAND_SOCKET_PATH.trim()) {
+    return process.env.FLAVOR_ISLAND_SOCKET_PATH.trim();
   }
   const uid = typeof process.getuid === "function" ? process.getuid() : 0;
-  return "/tmp/codeisland-" + uid + ".sock";
+  return "/tmp/flavor-island-" + uid + ".sock";
 }
 
 function toHookDecision(pipeResponse, event) {

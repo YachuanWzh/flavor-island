@@ -20,6 +20,7 @@ function newSession() {
     status: Status.idle,
     source: null,
     cwd: null,
+    title: null,
     model: null,
     cliPid: null,
     controlEndpoint: null,
@@ -123,6 +124,7 @@ function finishActivity(session, event, prefix, success) {
 function applyMetadata(session, raw) {
   if (typeof raw._source === 'string' && raw._source) session.source = raw._source;
   if (typeof raw.cwd === 'string' && raw.cwd) session.cwd = raw.cwd;
+  if (typeof raw.session_title === 'string' && raw.session_title.trim()) session.title = raw.session_title.trim();
   if (typeof raw.model === 'string' && raw.model) session.model = raw.model;
   if (typeof raw._ppid === 'number' && raw._ppid > 0) session.cliPid = raw._ppid;
   if (typeof raw.island_control_endpoint === 'string' && raw.island_control_endpoint) {
@@ -180,6 +182,7 @@ function reduceEvent(sessions, event) {
       const prompt = firstStringFromEvent(event, ['prompt', 'user_prompt', 'userPrompt', 'message', 'content', 'text']);
       if (prompt) {
         session.lastUserPrompt = prompt;
+        if (!session.title) session.title = prompt.split(/\r?\n/, 1)[0].trim().replace(/\s+/g, ' ').slice(0, 80) || null;
         if (session.recentMessages.at(-1)?.isUser) session.recentMessages.pop();
         addMessage(session, { isUser: true, text: prompt });
       }

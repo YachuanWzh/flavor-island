@@ -82,4 +82,13 @@ function computeNotchWindowBounds(height, { bounds, width }) {
   return { x, y, width: w, height: Math.max(1, Math.min(height, bounds.height)) };
 }
 
-module.exports = { clampWindowHeight, computeWindowBounds, computeNotchMetrics, computeNotchWindowBounds };
+// Keep enough room for the physical notch and both wings, while honoring the
+// renderer's measured content width even when it exceeds the usual 580px panel.
+function computeNotchContentWidth(notchWidth, measuredWidth, minWing = 60) {
+  const minimum = notchWidth + minWing * 2;
+  return Number.isFinite(measuredWidth) && measuredWidth > 0
+    ? Math.max(minimum, Math.round(measuredWidth))
+    : minimum;
+}
+
+module.exports = { clampWindowHeight, computeWindowBounds, computeNotchMetrics, computeNotchWindowBounds, computeNotchContentWidth };

@@ -34,7 +34,9 @@ function measureBrandWidth() {
   probe.textContent = 'Flavor Island';
   probe.style.cssText = 'position:absolute;visibility:hidden;max-width:none;width:auto;white-space:nowrap;';
   document.body.appendChild(probe);
-  const w = Math.ceil(probe.getBoundingClientRect().width);
+  // Leave a few pixels beyond the measured glyphs: fractional device scaling
+  // and Silkscreen's letter spacing can otherwise trigger an ellipsis.
+  const w = Math.ceil(probe.getBoundingClientRect().width) + 8;
   probe.remove();
   if (w > 0) {
     document.documentElement.style.setProperty('--brand-w', `${w}px`);
@@ -43,7 +45,9 @@ function measureBrandWidth() {
     if (typeof rerender === 'function' && lastRenderState) rerender();
   }
 }
-if (document.fonts && document.fonts.ready) document.fonts.ready.then(measureBrandWidth);
+if (document.fonts && document.fonts.load) {
+  document.fonts.load('10px Silkscreen', 'Flavor Island').then(measureBrandWidth, measureBrandWidth);
+}
 else measureBrandWidth();
 
 const SOUND_MAP = {
@@ -591,23 +595,25 @@ function render({ model, pending, sounds, settings = {}, notch: notchInfo = null
   }
 
   // Pill
-  const panelOpen = (model.autoExpand && model.requiresAttention) || (manualPanelOpen === null
+  const hasPanelContent = model.rows.length > 0;
+  if (!hasPanelContent) manualPanelOpen = null;
+  const wantsPanel = (model.autoExpand && model.requiresAttention) || (manualPanelOpen === null
     ? (model.autoExpand && !model.collapsed)
     : manualPanelOpen);
+  const panelOpen = hasPanelContent && wantsPanel;
   islandEl.classList.toggle('collapsed', !panelOpen);
   pillEl.setAttribute('aria-expanded', String(panelOpen));
+  pillEl.setAttribute('aria-disabled', String(!hasPanelContent));
+  pillEl.title = hasPanelContent
+    ? (notchInfo?.hasNotch ? '点击展开会话' : '点击展开会话；拖动可移动窗口')
+    : '暂无会话；右键打开菜单';
   pillEl.className = `pill state-${model.mascotState}`;
   mascot.setState(model.mascotState);
-  // Session-count badge: CodeIsland's compact right wing reads active/total
-  // ("2/3") so a running session is visible at a glance even collapsed, and
-  // just the total when nothing is active. The count slot is a fixed width in
-  // notch mode (see body.notch .pill-count) so this text never shifts the bar.
-  const activeCount = model.rows.reduce(
-    (n, r) => n + (r.statusKey && r.statusKey !== 'idle' ? 1 : 0), 0
-  );
-  pillCountEl.textContent = model.count > 0
-    ? (activeCount > 0 ? `${activeCount}/${model.count}` : String(model.count))
-    : '';
+  // The compact badge reports work in progress. Idle sessions remain in the
+  // panel, but counting them here makes the badge look like extra running work.
+  // Notch mode reserves this slot even when the count is hidden.
+  pillCountEl.textContent = model.activeCount > 0 ? String(model.activeCount) : '';
+  pillCountEl.title = model.activeCount > 0 ? `${model.activeCount} 个进行中的会话` : '';
 
   // Main debounces tool chips, but a reveal/swap still changes the pill text
   // and thus its width — tween the width so the pill stretches instead of
@@ -664,12 +670,12 @@ function render({ model, pending, sounds, settings = {}, notch: notchInfo = null
   const selection = active && typeof active.selectionStart === 'number'
     ? { start: active.selectionStart, end: active.selectionEnd } : null;
   panelEl.innerHTML = '';
-  // Multi-session navigation: a small heading names the session count so the
-  // expanded panel reads as a session list rather than a single status card.
+  // Show both numbers explicitly so saved idle rows are never mistaken for
+  // work that is still running.
   if (model.count > 0) {
     const head = document.createElement('div');
     head.className = 'panel-head';
-    head.innerHTML = `<span>${model.count} session${model.count === 1 ? '' : 's'}</span>`
+    head.innerHTML = `<span>${model.activeCount} active · ${model.count} session${model.count === 1 ? '' : 's'}</span>`
       + `<span class="head-actions">`
       + `<button class="settings-btn" type="button" aria-label="打开设置" title="设置">⚙</button>`
       // Quit lives in the header because on a notch Mac the tray icon can be
@@ -700,7 +706,7 @@ function render({ model, pending, sounds, settings = {}, notch: notchInfo = null
     div.innerHTML = `
       <div class="row-head" role="button" tabindex="0" aria-expanded="${isOpen}">
         <img class="row-icon" src="../assets/flavor.png" alt="" />
-        <span class="row-title">${escapeHtml(row.title)}</span>
+        <span class="row-title" title="${escapeHtml(row.title)}">${escapeHtml(row.title)}</span>
         <span class="${statusClass}">${escapeHtml(statusText)}</span>
         <span class="detail-chevron">▸</span>
       </div>
@@ -842,6 +848,7 @@ let dragStart = null; // { mouseX, mouseY, winX, winY }
 let suppressPillClick = false;
 
 function togglePanel() {
+  if (!lastRenderState?.model?.rows?.length) return;
   const currentlyOpen = !islandEl.classList.contains('collapsed');
   manualPanelOpen = !currentlyOpen;
   rerender();

@@ -12,6 +12,7 @@
 // execPath is the Electron binary — ELECTRON_RUN_AS_NODE (set by the relay)
 // turns it back into plain Node for the daemon.
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { createBridgeRelay } from "./bridgeRelay.mjs";
 import { transformEvent } from "./eventTransform.mjs";
@@ -21,6 +22,10 @@ const BLOCKING_TIMEOUT_MS = 86_400_000;
 const FIRE_TIMEOUT_MS = 10_000;
 
 export function activate(context) {
+  // A resumed flavor-code runtime reuses its session ID but owns a fresh HookBus
+  // sequence. Give each plugin activation an epoch so the island can distinguish
+  // the new stream from delayed events sent by the previous runtime.
+  const bridgeInstanceId = randomUUID();
   const names = [
     "SessionStart", "SessionEnd", "UserPromptSubmit", "Stop",
     "SubagentStart", "SubagentStop", "PreToolUse", "PostToolUse",
@@ -34,8 +39,12 @@ export function activate(context) {
     spawn,
     execPath: process.execPath,
     bridgePath,
-    transform: transformEvent,
+    transform: (event) => ({ ...transformEvent(event), bridge_instance_id: bridgeInstanceId }),
   });
+  const heartbeat = () => { void relay.relay({ type: 'IslandHello', payload: { protocolVersion: 2 } }); };
+  heartbeat();
+  const heartbeatTimer = setInterval(heartbeat, 30_000);
+  heartbeatTimer.unref?.();
   const disposers = [];
   for (const eventName of names) {
     const blocking = eventName === "PermissionRequest" || eventName === "Notification";
@@ -46,6 +55,7 @@ export function activate(context) {
     disposers.push(disposer);
   }
   return async () => {
+    clearInterval(heartbeatTimer);
     for (const dispose of disposers.reverse()) {
       try { await dispose(); } catch { /* ignore */ }
     }

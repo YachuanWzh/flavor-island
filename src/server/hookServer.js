@@ -17,6 +17,7 @@ const MAX_PAYLOAD = 1024 * 1024; // 1MB, matches macOS HookServer.
 //   'event'           -> onEvent(event)           -> void (fire-and-forget UI update)
 function routeKind(event) {
   const name = normalize(event.eventName);
+  if (name === 'IslandHello') return 'hello';
   if (name === 'PermissionRequest') {
     // AskUserQuestion is information input (select/type), not a yes/no approval.
     return event.toolName === 'AskUserQuestion' ? 'askUserQuestion' : 'permission';
@@ -29,7 +30,7 @@ function routeKind(event) {
 // bridge, routes them, and for blocking events (permission/question) holds the
 // connection open until the handler resolves a decision, then writes the JSON
 // response back to the bridge.
-function createHookServer({ pipe = pipePath(), onEvent, onPermission, onQuestion, onAskUserQuestion } = {}) {
+function createHookServer({ pipe = pipePath(), onEvent, onPermission, onQuestion, onAskUserQuestion, onHello } = {}) {
   // Windows named pipes do not support TCP-style half-close, so we frame the
   // request with a trailing newline instead of relying on the peer's FIN: the
   // bridge writes `JSON\n` and waits, we read up to the newline, then reply and
@@ -66,6 +67,10 @@ function createHookServer({ pipe = pipePath(), onEvent, onPermission, onQuestion
     }
     try {
       switch (routeKind(event)) {
+        case 'hello':
+          onHello?.(event);
+          safeEnd(socket, '{}');
+          break;
         case 'permission': {
           const decision = await onPermission(event);
           safeEnd(socket, permissionResponse(decision, event));
@@ -101,13 +106,20 @@ function createHookServer({ pipe = pipePath(), onEvent, onPermission, onQuestion
       const startOnce = () => new Promise((resolve, reject) => {
         const onError = (err) => {
           server.removeListener('error', onError);
-          // Unix sockets leave a stale file behind after a crash; unlink it
-          // and retry once. (Windows named pipes never hit this path.)
+          // Unix sockets leave a file after a crash. Probe before unlinking:
+          // EADDRINUSE can also mean another live Flavor Island owns the path.
           if (!retriedStaleSocket && err && err.code === 'EADDRINUSE'
             && typeof pipe === 'string' && !pipe.startsWith('\\\\')) {
             retriedStaleSocket = true;
-            try { fs.unlinkSync(pipe); } catch { /* nothing to unlink */ }
-            startOnce().then(resolve, reject);
+            const probe = net.createConnection(pipe);
+            const timer = setTimeout(() => { probe.destroy(); reject(err); }, 500);
+            probe.once('connect', () => { clearTimeout(timer); probe.destroy(); reject(err); });
+            probe.once('error', (probeError) => {
+              clearTimeout(timer);
+              if (probeError.code !== 'ECONNREFUSED' && probeError.code !== 'ENOENT') return reject(err);
+              try { fs.unlinkSync(pipe); } catch { /* nothing to unlink */ }
+              startOnce().then(resolve, reject);
+            });
             return;
           }
           reject(err);
@@ -115,6 +127,9 @@ function createHookServer({ pipe = pipePath(), onEvent, onPermission, onQuestion
         server.once('error', onError);
         server.listen(pipe, () => {
           server.removeListener('error', onError);
+          if (typeof pipe === 'string' && !pipe.startsWith('\\\\')) {
+            try { fs.chmodSync(pipe, 0o600); } catch { /* ACL may already restrict access */ }
+          }
           resolve();
         });
       });

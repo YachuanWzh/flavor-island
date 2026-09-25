@@ -17,11 +17,15 @@
    side. */
 body.notch .island { padding: var(--notch-overscan, 0px) 0 0; }
 body.notch .pill {
+  --wing-w: calc(var(--brand-w, 120px) + 72px);
   position: relative;
   margin: 0 4px;
-  /* max-content (not a window-filling 100%) so the bar is exactly as wide as
-     its fixed brand slot needs — the window is then sized to this width, and
-     the bar stays centered with no side gaps. */
+  /* Equal wings keep the camera gap centered on the physical display. A
+     content-sized flex row shifted the gap toward the short mascot wing and
+     hid the start of the name behind the camera. */
+  display: grid;
+  grid-template-columns: var(--wing-w) calc(var(--notch-w, 200px) + 12px) var(--wing-w);
+  gap: 0;
   width: max-content;
   max-width: none;
   height: var(--notch-h, 32px);
@@ -29,17 +33,22 @@ body.notch .pill {
   border-radius: 0 0 12px 12px;
   background: #000;
   box-shadow: none;
-  padding: 0 12px;
-  justify-content: flex-start;
+  padding: 0;
 }
+body.notch .pill-left,
+body.notch .pill-right { display: flex; align-items: center; min-width: 0; }
+body.notch .pill-left { padding-left: 12px; }
+body.notch .pill-right { gap: 8px; padding: 0 12px; }
+body:not(.notch) .pill-left,
+body:not(.notch) .pill-right { display: contents; }
 /* Fixed brand slot: the status text always reserves exactly the brand width
    (--brand-w, measured in JS from "Flavor Island"), so the bar width never
    changes between idle / tool-running / expanded — longer tool text simply
    truncates with an ellipsis into the same slot. */
 body.notch .pill-status {
-  flex: 0 0 var(--brand-w, 160px);
-  width: var(--brand-w, 160px);
-  max-width: var(--brand-w, 160px);
+  flex: 0 0 var(--brand-w, 120px);
+  width: var(--brand-w, 120px);
+  max-width: var(--brand-w, 120px);
 }
 /* Keep the fused bar a strict constant width: the thinking dots and the count
    badge would otherwise add/remove width as state changes. Dots are dropped
@@ -48,10 +57,8 @@ body.notch .pill-status {
    shifts the bar. */
 body.notch .pill-dots { display: none !important; }
 body.notch .pill-count:empty { display: inline-block; visibility: hidden; }
-/* Fixed count slot: the badge now reads active/total ("2/3") which is wider
-   than a bare "3", so pin its width — otherwise the bar's right edge creeps as
-   sessions start/finish and the fused bar visibly jitters. Sized for up to
-   "NN/NN"; the empty :empty rule above keeps the slot reserved when hidden. */
+/* Reserve the count slot so starting and finishing work never shifts the bar.
+   The empty :empty rule above keeps the slot reserved when hidden. */
 body.notch .pill-count {
   flex: 0 0 auto;
   width: 40px;
@@ -78,18 +85,14 @@ body.notch .pill::after {
   right: calc(-1 * var(--notch-ext, 3px));
   background: radial-gradient(circle var(--notch-ext, 3px) at 100% 100%, transparent calc(var(--notch-ext, 3px) - 0.5px), #000 var(--notch-ext, 3px));
 }
-/* The gap that keeps wing content clear of the physical camera cutout.
-   Must be block-level — an inline span ignores `width` inside a flex row's
-   baseline flow (the gap was collapsing and the wings never split). */
+/* The centered gap covers the physical camera cutout with 6px spare per side. */
 body.notch .notch-gap {
   display: block;
-  flex-shrink: 0;
-  width: max(0px, calc(var(--notch-w, 0px) - 24px));
+  width: calc(var(--notch-w, 200px) + 12px);
 }
 body:not(.notch) .notch-gap { display: none; }
-/* The notch bar itself stays click/drag targets even outside the pill box —
-   the OS-drag region covers the whole bar. */
-body.notch .pill { cursor: grab; }
+/* A fused bar is pinned to the camera, so its only primary action is expand. */
+body.notch .pill { cursor: pointer; }
 body:not(.notch) .pill { cursor: pointer; }
 /* Fallback when macOS clamps the window below the notch: the bar can no
    longer cover the cutout, so it becomes a shorter "wings" strip whose top
@@ -98,18 +101,13 @@ body:not(.notch) .pill { cursor: pointer; }
 body.notch.notch-below .pill {
   height: calc(var(--notch-h, 32px) - 16px);
 }
-body.notch.notch-below .notch-gap {
-  width: max(8px, calc(var(--notch-w, 0px) - 24px));
-}
 body.notch.notch-below .pill::before,
 body.notch.notch-below .pill::after {
   --notch-ext: 9px;
 }
-/* Expanded panel: CodeIsland's expanded state widens the same notch shell
-   (topExtension 14, bottomRadius 24) — content hangs directly off the bar, so
-   the panel is full-width, flush under the bar, and only rounds its bottom. */
+/* Expanded content hangs directly off the bar with matching side edges. */
 body.notch .panel {
-  width: 100%;
+  width: calc(100% - 8px);
   margin-top: 0;
   border: none;
   border-top: 1px solid var(--line);
@@ -361,11 +359,11 @@ html, body {
   font-size: 12px;
   font-weight: 600;
   flex: 1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
-.row-status { font-size: 10px; color: var(--ash); flex-shrink: 0; }
+.row-status { font-size: 10px; color: var(--ash); flex-shrink: 0; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row.s-waitingApproval .row-status, .row.s-waitingQuestion .row-status { color: var(--warn); }
 /* Tool-colored status chip while a tool runs. */
 .row-status.tk-shell { color: var(--c-shell); }

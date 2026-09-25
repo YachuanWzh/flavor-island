@@ -58,8 +58,8 @@ Flavor Island **自带配套的 flavor-code 插件**（`src/plugin/`），并在
 1. 通过 flavor-code 的 hook 系统捕获 `SessionStart` / `UserPromptSubmit` /
    `PreToolUse` / `PostToolUse` / `PermissionRequest` / `Stop` 等全部生命周期事件；
 2. 通过常驻的 `bridgeRelay.mjs` / `bridgeDaemon.mjs` 把事件转发到浮岛监听的 endpoint：
-   - **Windows**：命名管道 `\\.\pipe\codeisland-<user>`（可用 `CODEISLAND_PIPE` 覆盖）
-   - **macOS**：Unix socket `/tmp/codeisland-<uid>.sock`（可用 `CODEISLAND_SOCKET_PATH` 覆盖，沿用 CodeIsland 原约定）
+   - **Windows**：命名管道 `\\.\pipe\flavor-island-<user>`（可用 `FLAVOR_ISLAND_PIPE` 覆盖）
+   - **macOS**：Unix socket `/tmp/flavor-island-<uid>.sock`（可用 `FLAVOR_ISLAND_SOCKET_PATH` 覆盖）
 3. 对 `PermissionRequest` 阻塞等待浮岛的决策并回写（allow / allow-all / deny）；
    会话级授权是否可用由 flavor-code 根据类别和操作风险决定，浮岛不会自行缓存权限；
    浮岛不可达时回退 `ask`，退回终端审批，不会阻塞 flavor-code。
@@ -68,8 +68,8 @@ Flavor Island **自带配套的 flavor-code 插件**（`src/plugin/`），并在
    写回；浮岛未应答时 flavor-code 自动退回终端提问，两端互为兜底。
 
 全局插件目录对所有项目生效，**无需在每个项目里 `flavor init` 或做任何配置**。
-若旧项目里仍残留内置 `codeisland` 插件，协议 v2 会按稳定 `eventId` 精确合并
-同一 hook 的重复 relay，不会把下一次内容相同的真实操作当作重复请求。
+首次安装或升级插件后需要重启 flavor-code 会话，因为插件在会话启动时加载。
+旧项目里的 `codeisland` 插件继续使用 CodeIsland 的独立通信地址。
 
 ## 🔌 工作原理
 
@@ -77,8 +77,8 @@ Flavor Island **自带配套的 flavor-code 插件**（`src/plugin/`），并在
 flavor-code (CLI)
   → flavor-island 插件（~/.flavor-code/plugins，启动浮岛时自动安装）
     → bridgeRelay.mjs → bridgeDaemon.mjs
-      → Windows: \\.\pipe\codeisland-<user>
-      → macOS:   /tmp/codeisland-<uid>.sock
+      → Windows: \\.\pipe\flavor-island-<user>
+      → macOS:   /tmp/flavor-island-<uid>.sock
         → Flavor Island (Electron)
           → 实时更新浮岛 UI（状态色 / 动效 / 会话列表）
           → 审批/问答决策写回 socket → bridge 转成 hook decision

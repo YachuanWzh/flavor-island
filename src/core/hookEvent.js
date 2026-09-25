@@ -156,11 +156,13 @@ function parseHookEvent(buffer) {
   const agentId = typeof json.agent_id === 'string' ? json.agent_id : null;
   const eventId = firstString(json, ['event_id', 'eventId']);
   const eventSequence = Number.isSafeInteger(json.event_sequence) ? json.event_sequence : null;
+  const bridgeInstanceId = firstString(json, ['bridge_instance_id']);
 
   return {
     eventName,
     eventId,
     eventSequence,
+    bridgeInstanceId,
     sessionId,
     toolName,
     toolUseId,

@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { clampWindowHeight, computeWindowBounds, computeNotchMetrics, computeNotchWindowBounds } = require('../src/core/windowLayout');
+const { clampWindowHeight, computeWindowBounds, computeNotchMetrics, computeNotchWindowBounds, computeNotchContentWidth } = require('../src/core/windowLayout');
 
 test('clampWindowHeight clamps to available minus margin', () => {
   assert.equal(clampWindowHeight(100, 800, { topMargin: 6 }), 100);
@@ -112,9 +112,11 @@ test('computeNotchMetrics auto mode falls back to macOS detection', () => {
   assert.equal(m.notchHeight, 38);
 });
 
-// CodeIsland sizes the bar to its content: collapsed width is
-// notchW + 2*wing, expanded widens to max(nw+200, 580) capped by the screen.
-// The window follows whatever width the renderer measured.
+test('notch width preserves the measured brand slot past 580px', () => {
+  assert.equal(computeNotchContentWidth(212, null), 332);
+  assert.equal(computeNotchContentWidth(212, 586), 586);
+});
+
 test('notch window bounds pin the window to the physical screen top', () => {
   const b = computeNotchWindowBounds(56, {
     bounds: { x: 0, y: 0, width: 1512, height: 982 },

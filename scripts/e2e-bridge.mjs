@@ -1,14 +1,18 @@
-// E2E check: real bridge.mjs (as flavor-code would run it) against a real
-// hookServer. Uses CODEISLAND_PIPE to avoid the production pipe.
+// E2E check: real bridgeDaemon.mjs (as flavor-code runs it) against a real
+// hookServer. Uses FLAVOR_ISLAND_PIPE to avoid the production pipe.
 import { spawn } from 'node:child_process';
 import net from 'node:net';
+import os from 'node:os';
+import path from 'node:path';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const { createHookServer } = require('../src/server/hookServer.js');
 const { buildAllowResponse } = require('../src/core/askQuestion.js');
 
-const PIPE = `\\\\.\\pipe\\flavor-island-e2e-${process.pid}`;
+const PIPE = process.platform === 'win32'
+  ? `\\\\.\\pipe\\flavor-island-e2e-${process.pid}`
+  : path.join(os.tmpdir(), `flavor-island-e2e-${process.pid}.sock`);
 const received = [];
 
 const server = createHookServer({
@@ -24,9 +28,9 @@ console.log('server listening on', PIPE);
 
 function runBridge(event) {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, ['src/plugin/bridge.mjs'], {
+    const child = spawn(process.execPath, ['src/plugin/bridgeDaemon.mjs'], {
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, CODEISLAND_PIPE: PIPE },
+      env: { ...process.env, FLAVOR_ISLAND_PIPE: PIPE, FLAVOR_ISLAND_SOCKET_PATH: PIPE },
     });
     let stdout = '';
     let stderr = '';
@@ -34,7 +38,7 @@ function runBridge(event) {
     child.stderr.on('data', (d) => { stderr += d; });
     child.on('close', (code) => resolve({ code, stdout, stderr }));
     child.on('error', reject);
-    child.stdin.end(JSON.stringify(event));
+    child.stdin.end(JSON.stringify({ id: 1, event, wait: event.type === 'PermissionRequest' }) + '\n');
   });
 }
 
@@ -79,11 +83,11 @@ const ok = received.length === 4
   && received[1].rawJSON.prompt === 'build the island'
   && received[2].toolName === 'Shell'
   && received[3].toolName === 'AskUserQuestion'
-  && JSON.parse(r3.stdout).decision === 'allow'
-  && askDecision.decision === 'allow'
-  && askDecision.updatedInput.tool === 'AskUserQuestion'
-  && askDecision.updatedInput.agent === 'main'
-  && askDecision.updatedInput.input.answers['Pick one?'] === 'Option A';
+  && JSON.parse(r3.stdout).decision.decision === 'allow'
+  && askDecision.decision.decision === 'allow'
+  && askDecision.decision.updatedInput.tool === 'AskUserQuestion'
+  && askDecision.decision.updatedInput.agent === 'main'
+  && askDecision.decision.updatedInput.input.answers['Pick one?'] === 'Option A';
 await server.stop();
 console.log(ok ? 'E2E OK' : 'E2E FAILED');
 process.exit(ok ? 0 : 1);

@@ -27,7 +27,11 @@ function createAppState(options = {}) {
     const t = setTimeout(fn, ms);
     return { clear: () => clearTimeout(t) };
   });
-  const sessions = {};
+  const sessions = { ...(options.initialSessions || {}) };
+  const isProcessAlive = options.isProcessAlive || ((pid) => {
+    try { process.kill(pid, 0); return true; }
+    catch (error) { return error?.code === 'EPERM'; }
+  });
   const subscribers = new Set();
   // key -> { resolve, event, sessionId, kind }
   const pending = new Map();
@@ -43,6 +47,7 @@ function createAppState(options = {}) {
   // sessionId -> tool-display scheduler state (see the smoothing block above).
   const toolDisplay = new Map();
   const lastSequences = new Map();
+  const retiredEpochs = new Map();
   let seq = 0;
 
   function notify(effects = []) {
@@ -63,6 +68,7 @@ function createAppState(options = {}) {
         }
         dropToolDisplay(e.sessionId);
         lastSequences.delete(e.sessionId);
+        retiredEpochs.delete(e.sessionId);
       }
     }
     pruneRecentDecisions();
@@ -118,10 +124,27 @@ function createAppState(options = {}) {
 
   function handleEvent(event) {
     const sessionId = event?.sessionId || 'default';
+    const epoch = typeof event?.bridgeInstanceId === 'string' ? event.bridgeInstanceId : null;
     if (Number.isSafeInteger(event?.eventSequence)) {
       const last = lastSequences.get(sessionId);
-      if (Number.isSafeInteger(last) && event.eventSequence <= last) return;
-      lastSequences.set(sessionId, event.eventSequence);
+      if (epoch && retiredEpochs.get(sessionId)?.has(epoch)) return;
+      if (last && epoch && last.epoch !== epoch) {
+        // A new runtime may reuse the session ID. Only its SessionStart may
+        // replace the previous stream; late old-runtime events then stay out.
+        if (event.eventName !== 'SessionStart') return;
+        const retired = retiredEpochs.get(sessionId) || new Set();
+        if (last.epoch) retired.add(last.epoch);
+        retiredEpochs.set(sessionId, retired);
+        denyPendingForSession(sessionId);
+        dropToolDisplay(sessionId);
+      } else if (last && event.eventSequence <= last.sequence) {
+        // Legacy relays have no epoch. A fresh SessionStart with a reset
+        // sequence is still a stronger signal than the cached high-water mark.
+        if (event.eventName !== 'SessionStart' || (last.epoch && epoch && last.epoch === epoch)) return;
+        denyPendingForSession(sessionId);
+        dropToolDisplay(sessionId);
+      }
+      lastSequences.set(sessionId, { epoch, sequence: event.eventSequence });
     }
     const { effects } = reduceEvent(sessions, event);
     applyEffects(effects);
@@ -541,10 +564,47 @@ function createAppState(options = {}) {
     for (const [id, s] of Object.entries(sessions)) {
       if (s.status === Status.idle && now - (s.lastActivity || 0) > maxIdleMs) {
         delete sessions[id];
+        dropToolDisplay(id);
+        lastSequences.delete(id);
+        retiredEpochs.delete(id);
         changed = true;
       }
     }
     if (changed) notify();
+  }
+
+  // Hook delivery is best effort on process crashes. Remove sessions whose
+  // actual flavor-code process is gone, and settle a missed Stop after a long
+  // silent period without touching approval/question cards.
+  function cleanupStale(now = Date.now(), maxSilentMs = 10 * 60 * 1000) {
+    let changed = false;
+    for (const [id, session] of Object.entries(sessions)) {
+      const age = now - (session.lastActivity || 0);
+      if (session.cliPid && age > 5000 && !isProcessAlive(session.cliPid)) {
+        denyPendingForSession(id);
+        delete sessions[id];
+        dropToolDisplay(id);
+        lastSequences.delete(id);
+        retiredEpochs.delete(id);
+        changed = true;
+      } else if (age > maxSilentMs && [Status.processing, Status.running, Status.planning].includes(session.status)) {
+        session.status = Status.idle;
+        session.currentTool = null;
+        session.toolDescription = null;
+        session.activeTool = null;
+        session.activeActivities = {};
+        dropToolDisplay(id);
+        changed = true;
+      }
+    }
+    if (changed) notify();
+  }
+
+  function restoreSessions(saved) {
+    for (const [id, session] of Object.entries(saved || {})) {
+      if (!sessions[id]) sessions[id] = session;
+    }
+    notify();
   }
 
   return {
@@ -559,6 +619,8 @@ function createAppState(options = {}) {
     fallbackPending,
     listPending,
     cleanupIdle,
+    cleanupStale,
+    restoreSessions,
     subscribe(fn) { subscribers.add(fn); return () => subscribers.delete(fn); },
     snapshot() { return { sessions }; },
   };

@@ -6,12 +6,13 @@ const fs = require('node:fs');
 const { createAppState } = require('./appState');
 const { createHookServer } = require('../server/hookServer');
 const { renderModel } = require('../core/renderModel');
-const { computeWindowBounds, computeNotchMetrics, computeNotchWindowBounds } = require('../core/windowLayout');
+const { computeWindowBounds, computeNotchMetrics, computeNotchWindowBounds, computeNotchContentWidth } = require('../core/windowLayout');
 const { pipePath } = require('../core/pipePath');
 const { installPlugin } = require('./pluginInstaller');
 const { normalizeSettings, DEFAULT_SETTINGS } = require('../core/settings');
 const { sendControlCommand } = require('./controlClient');
 const { applyNotchStationary } = require('./notchStationary');
+const { loadSessionCache, saveSessionCache } = require('./sessionCache');
 const os = require('node:os');
 const { parseRuleLines, validateRule, addRule, removeRule, updateRule } = require('../core/globalRules');
 
@@ -64,6 +65,10 @@ let settingsWin = null;
 let server = null;
 let settings = normalizeSettings(DEFAULT_SETTINGS);
 let serverStatus = 'starting';
+let lastHookAt = null;
+let pluginSeenAt = null;
+let sessionCacheFile = null;
+let cacheTimer = null;
 let quitting = false;
 // Renderer is not ready to receive state until its page finishes loading.
 // Pushing earlier races the load and Electron logs "Render frame was disposed".
@@ -86,8 +91,10 @@ let notch = { hasNotch: false, notchHeight: 0, notchWidth: 0 };
 // notch (it clamped the frameless window below the menu bar) — then we hug the
 // notch's bottom edge instead and the renderer shrinks the bar to wing height.
 let notchFlush = 'cover';
-// CodeIsland sizing rules: collapsed bar = notch + two content wings; the
-// expanded panel widens toward ~580 logical px, capped by the screen width.
+// Preserve the renderer's measured bar width across reset/display/settings
+// repositions. Those calls do not carry a fresh measurement.
+let notchContentWidth = null;
+// Minimum wing size before the renderer reports the actual content width.
 const NOTCH_MIN_WING = 60;
 // macOS rounds the corners of every window at the system level (since Big Sur,
 // including borderless panels), which bites blue into the fused bar's top
@@ -99,6 +106,7 @@ const NOTCH_TOP_OVERSCAN = IS_MAC ? 8 : 0;
 
 function positionWindow(height, contentWidth = null) {
   if (!win || win.isDestroyed()) return;
+  if (Number.isFinite(contentWidth) && contentWidth > 0) notchContentWidth = contentWidth;
   const current = win.getBounds();
   const point = userPosition || { x: current.x + Math.round(current.width / 2), y: current.y + Math.round(current.height / 2) };
   const display = screen.getDisplayNearestPoint(point);
@@ -121,14 +129,9 @@ function positionWindow(height, contentWidth = null) {
     // Notch mode: pin the window to the very top of the *physical* display so
     // the black bar covers the notch itself (mirrors CodeIsland's panel frame
     // at screen.frame.maxY - height). The user's drag only shifts X — Y stays
-    // fused with the notch. Width is content-driven (the renderer measures the
-    // bar when collapsed and the panel when expanded), floored at notch + wings.
-    // CodeIsland expanded panel: max(nw + 200, 580), capped by the screen.
-    // A wider content width from the renderer means the panel is expanded.
-    let width = notch.notchWidth + NOTCH_MIN_WING * 2;
-    if (contentWidth && contentWidth > width) {
-      width = Math.max(width, Math.min(Math.max(notch.notchWidth + 200, 580), contentWidth));
-    }
+    // fused with the notch. Honor the measured bar width on both states;
+    // clipping it would hide the name and offset the camera gap.
+    const width = computeNotchContentWidth(notch.notchWidth, notchContentWidth, NOTCH_MIN_WING);
     bounds = computeNotchWindowBounds(height, { bounds: display.bounds, width });
     if (notchFlush === 'below') {
       bounds.y = display.workArea.y;
@@ -227,7 +230,15 @@ function createWindow() {
   });
   win = islandWindow;
   islandWindow.setAlwaysOnTop(true, 'screen-saver');
-  islandWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  // The app is already an accessory (app.dock.hide in whenReady), so avoid
+  // Electron's extra process-type switch and its brief hide/show cycle.
+  islandWindow.setVisibleOnAllWorkspaces(true, {
+    visibleOnFullScreen: true,
+    ...(IS_MAC ? { skipTransformProcessType: true } : {}),
+  });
+  // Set .stationary before the first paint, then verify again after loading in
+  // case AppKit reconfigured the window while Electron finished setup.
+  if (IS_MAC) applyNotchStationary(islandWindow);
   // A transparent window still swallows clicks on every pixel, so the fixed-width
   // island would block the mostly-empty area around the pill. Start fully
   // click-through; the renderer re-arms us (set-ignore-mouse) only while the
@@ -241,11 +252,7 @@ function createWindow() {
     rendererReady = true;
     // Render whatever state accumulated while the page was loading.
     pushState();
-    // The window title (used to locate the NSWindow) is applied from the HTML
-    // <title> only once the page has loaded, so this is the earliest reliable
-    // point to pin the notch window's collection behavior. A short defer lets
-    // AppKit finish registering the window in NSApp.windows.
-    if (IS_MAC) setTimeout(() => applyNotchStationary(), 300);
+    if (IS_MAC) applyNotchStationary(islandWindow);
   });
   islandWindow.webContents.on('render-process-gone', () => {
     if (win !== islandWindow) return;
@@ -297,14 +304,30 @@ function pushState(effects = []) {
 async function startServer() {
   server = createHookServer({
     pipe: pipePath(process.env),
-    onEvent: (event) => appState.handleEvent(event),
-    onPermission: (event) => appState.requestPermission(event),
-    onQuestion: (event) => appState.requestQuestion(event),
+    onEvent: (event) => { recordHook(); appState.handleEvent(event); },
+    onPermission: (event) => { recordHook(); return appState.requestPermission(event); },
+    onQuestion: (event) => { recordHook(); return appState.requestQuestion(event); },
     // AskUserQuestion: interactive select/type. Blocks until the user answers in
     // the island; resolves with the full PermissionRequest allow+answers object.
-    onAskUserQuestion: (event) => appState.requestAskUserQuestion(event),
+    onAskUserQuestion: (event) => { recordHook(); return appState.requestAskUserQuestion(event); },
+    onHello: () => { pluginSeenAt = Date.now(); pushSettingsStatus(); },
   });
   await server.start();
+}
+
+function recordHook() {
+  lastHookAt = Date.now();
+  pluginSeenAt = lastHookAt;
+  pushSettingsStatus();
+}
+
+function scheduleSessionCache() {
+  if (!sessionCacheFile || cacheTimer) return;
+  cacheTimer = setTimeout(() => {
+    cacheTimer = null;
+    try { saveSessionCache(sessionCacheFile, appState.snapshot().sessions); }
+    catch (error) { console.error(`session cache save failed: ${error.message}`); }
+  }, 500);
 }
 
 // If another process holds the pipe (a stale instance, or CodeIslandWin running
@@ -389,8 +412,16 @@ function pushSettingsStatus() {
   if (!settingsWin || settingsWin.isDestroyed() || settingsWin.webContents.isDestroyed()) return;
   settingsWin.webContents.send('settings-state', {
     settings,
-    status: { server: serverStatus, plugin: pluginStatus || 'installing', sessions: Object.keys(appState.snapshot().sessions).length },
+    status: settingsStatus(),
   });
+}
+
+function settingsStatus() {
+  const sessions = Object.values(appState.snapshot().sessions);
+  return { server: serverStatus, plugin: pluginStatus || 'installing',
+    sessions: sessions.length,
+    activeSessions: sessions.filter((session) => session.status && session.status !== 'idle').length,
+    lastHookAt, pluginSeenAt };
 }
 
 function updateSettings(patch) {
@@ -457,6 +488,8 @@ app.whenReady().then(async () => {
   if (process.platform === 'darwin' && app.dock) app.dock.hide();
 
   loadSettings();
+  sessionCacheFile = path.join(app.getPath('userData'), 'sessions.json');
+  appState.restoreSessions(loadSessionCache(sessionCacheFile));
   app.setLoginItemSettings({ openAtLogin: settings.launchAtLogin });
   setupPlugin();
   createWindow();
@@ -467,6 +500,7 @@ app.whenReady().then(async () => {
   appState.subscribe((_, effects) => {
     pushState(effects);
     pushSettingsStatus();
+    scheduleSessionCache();
   });
   pushState();
 
@@ -481,7 +515,7 @@ app.whenReady().then(async () => {
   screen.on('display-removed', keepIslandVisible);
   screen.on('display-metrics-changed', keepIslandVisible);
 
-  setInterval(() => appState.cleanupIdle(), 30 * 1000);
+  setInterval(() => { appState.cleanupStale(); appState.cleanupIdle(); }, 30 * 1000);
 });
 
 // The renderer measures its own layout and reports the needed size. In notch
@@ -522,7 +556,7 @@ ipcMain.on('ask-answer', (_evt, { key, answers, details }) => appState.resolveAs
 ipcMain.on('ask-skip', (_evt, { key }) => appState.skipAskUserQuestion(key));
 ipcMain.handle('settings-get', () => ({
   settings,
-  status: { server: serverStatus, plugin: pluginStatus || 'installing', sessions: Object.keys(appState.snapshot().sessions).length },
+  status: settingsStatus(),
 }));
 ipcMain.handle('settings-save', (_evt, value) => updateSettings(value || {}));
 ipcMain.handle('settings-reset', () => updateSettings(DEFAULT_SETTINGS));
@@ -634,5 +668,10 @@ app.on('window-all-closed', () => { /* keep running in tray */ });
 app.on('before-quit', async () => {
   quitting = true;
   appState.fallbackPending('Flavor Island is quitting');
+  if (cacheTimer) clearTimeout(cacheTimer);
+  if (sessionCacheFile) {
+    try { saveSessionCache(sessionCacheFile, appState.snapshot().sessions); }
+    catch (error) { console.error(`session cache save failed: ${error.message}`); }
+  }
   if (server) await server.stop();
 });

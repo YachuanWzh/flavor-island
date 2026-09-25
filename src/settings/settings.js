@@ -11,22 +11,41 @@ const priceIds = {
 };
 let applying = false;
 let saveTimer = null;
+let latestStatus = null;
+
+function refreshConnection() {
+  const status = latestStatus;
+  if (!status) return;
+  const listening = status.server === 'connected';
+  const received = Number.isFinite(status.lastHookAt);
+  const age = received ? Math.max(0, Date.now() - status.lastHookAt) : null;
+  const recent = received && age < 5 * 60 * 1000;
+  const pluginOnline = Number.isFinite(status.pluginSeenAt) && Date.now() - status.pluginSeenAt < 90_000;
+  document.querySelector('.connection-card').classList.toggle('connected', (pluginOnline || recent) && listening);
+  document.getElementById('live-label').textContent = !listening ? '服务未就绪'
+    : recent ? '正在接收 Flavor Code 事件' : pluginOnline ? '插件已接入，等待事件' : '等待 Flavor Code 插件';
+  document.getElementById('last-hook-status').textContent = !received ? '尚未收到'
+    : age < 60_000 ? '刚刚' : `${Math.floor(age / 60_000)} 分钟前`;
+  document.getElementById('connection-hint').textContent = listening && !pluginOnline && !received
+    ? '如果 Flavor Code 在插件安装或升级前已经启动，请重启该会话。'
+    : listening && !recent ? '暂时没有新事件；运行任务后此处会更新。' : '';
+}
 
 function apply({ settings, status }) {
   applying = true;
+  latestStatus = status;
   for (const [key, id] of Object.entries(ids)) {
     const input = document.getElementById(id);
     if (input.type === 'checkbox') input.checked = !!settings[key]; else input.value = settings[key];
   }
   for (const [key, id] of Object.entries(priceIds)) document.getElementById(id).value = settings.pricing[key] || '';
-  const serverLabels = { connected: '已连接', retrying: '重试中', starting: '启动中' };
+  const serverLabels = { connected: '监听中', retrying: '重试中', starting: '启动中' };
   const pluginLabels = { installed: '已安装', installing: '安装中' };
   document.getElementById('server-status').textContent = serverLabels[status.server] || status.server;
   document.getElementById('plugin-status').textContent = pluginLabels[status.plugin] || status.plugin;
   document.getElementById('session-count').textContent = String(status.sessions);
-  const connection = document.querySelector('.connection-card');
-  connection.classList.toggle('connected', status.server === 'connected');
-  document.getElementById('live-label').textContent = status.server === 'connected' ? '运行正常' : '正在连接';
+  document.getElementById('active-session-count').textContent = String(status.activeSessions || 0);
+  refreshConnection();
   applying = false;
 }
 
@@ -213,6 +232,7 @@ globalAddBtnEl.addEventListener('click', addGlobalRule);
 globalAddInputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') addGlobalRule(); });
 
 window.flavorSettings.onState(apply);
+setInterval(refreshConnection, 30_000);
 
 refreshGlobal().catch((error) => {
   globalRuleListEl.textContent = '';

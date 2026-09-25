@@ -47,6 +47,22 @@ test('routes plain events to onEvent and replies {}', async () => {
   }
 });
 
+test('plugin heartbeat reports connection without creating a session event', async () => {
+  const pipe = makePipe();
+  let hellos = 0;
+  let events = 0;
+  const server = createHookServer({ pipe, onHello: () => { hellos++; }, onEvent: () => { events++; } });
+  await server.start();
+  try {
+    const reply = await sendLine(pipe, JSON.stringify({ hook_event_name: 'IslandHello', session_id: 'plugin' }) + '\n');
+    assert.equal(reply, '{}');
+    assert.equal(hellos, 1);
+    assert.equal(events, 0);
+  } finally {
+    await server.stop();
+  }
+});
+
 test('permission events block until onPermission resolves', async () => {
   const pipe = makePipe();
   let resolvePerm;
@@ -109,6 +125,7 @@ test('malformed payload replies parse_failed', async () => {
 
 test('routeKind classifies events', () => {
   const base = (name, tool) => ({ eventName: name, toolName: tool, rawJSON: {} });
+  assert.equal(routeKind(base('IslandHello')), 'hello');
   assert.equal(routeKind(base('PermissionRequest', 'Bash')), 'permission');
   assert.equal(routeKind(base('PermissionRequest', 'AskUserQuestion')), 'askUserQuestion');
   assert.equal(routeKind({ ...base('Notification'), rawJSON: { question: 'hi' } }), 'question');

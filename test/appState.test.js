@@ -34,6 +34,30 @@ test('stale sequenced events are ignored after a newer event', () => {
   assert.equal(state.snapshot().sessions.s1.lastUserPrompt, 'new');
 });
 
+test('a resumed runtime resets the sequence and rejects delayed events from the old runtime', () => {
+  const state = createAppState();
+  state.handleEvent(evt('SessionStart', { bridgeInstanceId: 'old', eventSequence: 20 }));
+  state.handleEvent(evt('SessionStart', { bridgeInstanceId: 'new', eventSequence: 1 }));
+  state.handleEvent(evt('UserPromptSubmit', { bridgeInstanceId: 'new', eventSequence: 2, rawJSON: { prompt: 'resumed' } }));
+  state.handleEvent(evt('SessionStart', { bridgeInstanceId: 'old', eventSequence: 21 }));
+  state.handleEvent(evt('UserPromptSubmit', { bridgeInstanceId: 'old', eventSequence: 22, rawJSON: { prompt: 'stale' } }));
+  assert.equal(state.snapshot().sessions.s1.lastUserPrompt, 'resumed');
+});
+
+test('cleanupStale removes a session whose host process died', () => {
+  const state = createAppState({ isProcessAlive: () => false });
+  state.handleEvent(evt('SessionStart', { rawJSON: { _ppid: 12345 } }));
+  state.cleanupStale(Date.now() + 10_000);
+  assert.equal(state.snapshot().sessions.s1, undefined);
+});
+
+test('cleanupStale settles silent processing without removing a live session', () => {
+  const state = createAppState({ isProcessAlive: () => true });
+  state.handleEvent(evt('UserPromptSubmit', { rawJSON: { _ppid: 12345, prompt: 'work' } }));
+  state.cleanupStale(Date.now() + 11 * 60_000);
+  assert.equal(state.snapshot().sessions.s1.status, Status.idle);
+});
+
 test('fallbackPending releases blocking work back to flavor-code', async () => {
   const state = createAppState();
   const permission = state.requestPermission(evt('PermissionRequest', { toolName: 'Bash' }));

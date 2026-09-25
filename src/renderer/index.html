@@ -9,11 +9,13 @@
 <body>
   <div id="island" class="island collapsed">
     <div id="pill" class="pill" role="button" tabindex="0" aria-expanded="false" aria-controls="panel" title="Click to expand; drag to move; double-click to recenter">
-      <canvas id="mascot" class="mascot" width="48" height="48"></canvas>
+      <span class="pill-left"><canvas id="mascot" class="mascot" width="48" height="48"></canvas></span>
       <span class="notch-gap" aria-hidden="true"></span>
-      <span id="pill-status" class="pill-status">Flavor Island</span>
-      <span class="pill-dots"><i></i><i></i><i></i></span>
-      <span id="pill-count" class="pill-count"></span>
+      <span class="pill-right">
+        <span id="pill-status" class="pill-status">Flavor Island</span>
+        <span class="pill-dots"><i></i><i></i><i></i></span>
+        <span id="pill-count" class="pill-count"></span>
+      </span>
     </div>
     <div id="panel" class="panel"></div>
   </div>
