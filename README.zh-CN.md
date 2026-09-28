@@ -106,6 +106,21 @@ npm run dist:mac   # 打包 macOS 安装包（dmg + zip，需在 macOS 上执行
 
 首次运行后，浮岛会在系统托盘常驻（托盘菜单可查看插件安装状态）。
 
+### Codex 适配（本地预览）
+
+仓库内的 [`plugins/flavor-island/`](plugins/flavor-island/) 是独立的 Codex 插件。它把 Codex 的会话、工具、子 Agent、压缩和完成事件转成浮岛已有的本地协议；`PermissionRequest` 可在浮岛里选择一次允许或拒绝。需要本机 `node` 命令可用，并先启动 Flavor Island。
+
+在仓库根目录执行：
+
+```bash
+codex plugin marketplace add .
+codex plugin add flavor-island@flavor-island-repo
+```
+
+然后在 Codex CLI 用 `/hooks` 审核并信任这些 hook，重新打开 Codex 会话。插件安装不会自动信任 hook；不信任时 Codex 会跳过它们。浮岛不可达时，审批交回 Codex 原有界面。更多说明见 [Codex Hooks](https://learn.chatgpt.com/docs/hooks) 和 [插件安装文档](https://developers.openai.com/plugins/build/plugins)。
+
+目前 Codex 端支持会话状态、工具活动、子 Agent 活动和一次性审批。Codex hook 暂不提供 flavor-code 的 `AskUserQuestion` 答案回写、`allow-all` 会话规则、`BeforeModelCall`/`AfterModelCall` 用量，以及 `/go` 的专有任务快照；这些卡片在 Codex 会话中不会出现。此适配尚未在正式 Codex 桌面运行中验证，仓库测试覆盖事件映射、真实命名管道传输及审批返回。
+
 ### 验证链路
 
 ```bash
@@ -125,6 +140,7 @@ src/
   assets/     图标与音效
 test/         node:test 单元测试
 scripts/      诊断与端到端验证脚本
+plugins/      可选 Codex 插件（需单独安装并信任 hooks）
 ```
 
 ## 🙏 致谢

@@ -97,6 +97,21 @@ npm run dist:mac   # build the macOS package (dmg + zip, must run on macOS)
 
 After the first run, the island stays in the system tray (the tray menu shows plugin install status).
 
+### Codex adapter (local preview)
+
+[`plugins/flavor-island/`](plugins/flavor-island/) is a separate Codex plugin. It maps Codex session, tool, subagent, compaction, and completion hooks to the island's existing local protocol. `PermissionRequest` can be approved once or denied in the island. A working `node` command and a running Flavor Island app are required.
+
+From this repository root:
+
+```bash
+codex plugin marketplace add .
+codex plugin add flavor-island@flavor-island-repo
+```
+
+Review and trust the hooks with `/hooks` in Codex CLI, then start a new Codex session. Installing a plugin does not automatically trust its hooks. If the island is unavailable, Codex keeps its normal approval prompt. See the official [Codex Hooks](https://learn.chatgpt.com/docs/hooks) and [plugin installation](https://developers.openai.com/plugins/build/plugins) documentation.
+
+The Codex adapter currently covers session status, tool and subagent activity, and one-time approval. Codex hooks do not provide the flavor-code `AskUserQuestion` answer contract, `allow-all` session rules, `BeforeModelCall`/`AfterModelCall` usage data, or `/go` task snapshots. These cards are therefore unavailable for Codex sessions. The adapter has protocol tests but has not yet been verified inside a live Codex desktop session.
+
 ### Verify the pipeline
 
 ```bash
@@ -116,6 +131,7 @@ src/
   assets/     icons and sounds
 test/         node:test unit tests
 scripts/      diagnostic & end-to-end verification scripts
+plugins/      optional Codex plugin (installed and hook-trusted separately)
 ```
 
 ## 🙏 Credits

@@ -381,6 +381,7 @@ html, body {
 }
 .row.open .detail-chevron { transform: rotate(90deg); color: var(--fg); }
 .row-icon { width: 16px; height: 16px; image-rendering: pixelated; flex-shrink: 0; }
+.row-icon-codex { display: inline-grid; place-items: center; border-radius: 4px; background: #e6e8ea; color: #16191c; font: 700 11px/1 system-ui, sans-serif; }
 .row-title {
   font-size: 12px;
   font-weight: 600;

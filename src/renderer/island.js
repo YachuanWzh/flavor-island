@@ -679,7 +679,9 @@ function render({ model, pending, sounds, settings = {}, notch: notchInfo = null
     div.classList.toggle('open', isOpen);
     div.innerHTML = `
       <div class="row-head" role="button" tabindex="0" aria-expanded="${isOpen}">
-        <img class="row-icon" src="../assets/flavor.png" alt="" />
+        ${row.source === 'codex'
+          ? '<span class="row-icon row-icon-codex" aria-label="Codex">C</span>'
+          : '<img class="row-icon" src="../assets/flavor.png" alt="" />'}
         <span class="row-title" title="${escapeHtml(row.title)}">${escapeHtml(row.title)}</span>
         <span class="${statusClass}">${escapeHtml(statusText)}</span>
         <span class="detail-chevron">▸</span>

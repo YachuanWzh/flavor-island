@@ -1,0 +1,17 @@
+{
+  "name": "flavor-island",
+  "version": "0.9.0",
+  "description": "Show local Codex activity and approval requests in Flavor Island.",
+  "author": {
+    "name": "YachuanWzh"
+  },
+  "interface": {
+    "displayName": "Flavor Island",
+    "shortDescription": "Show Codex activity in the desktop island.",
+    "longDescription": "Relays local Codex lifecycle and approval hooks to the Flavor Island desktop app.",
+    "developerName": "YachuanWzh",
+    "category": "Productivity",
+    "capabilities": ["Read", "Write"],
+    "defaultPrompt": "Help me verify that Flavor Island is receiving this Codex session's hooks."
+  }
+}
